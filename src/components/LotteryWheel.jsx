@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig'; // Import your firebaseConfig
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 
-const TIERS = [50, 100, 300, 500];
+const TIERS = [50, 100, 200, 500];
 
 // Vibrant colors for wheel slices
 const SLICE_COLORS = [

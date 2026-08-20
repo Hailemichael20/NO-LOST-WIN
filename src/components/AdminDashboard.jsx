@@ -8,11 +8,15 @@ import {
   doc, 
   updateDoc, 
   deleteDoc,
-  orderBy 
+  orderBy,
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
 
-const TIERS = ['all', 50, 100, 300, 500];
+const TIERS = ['all', 50, 100, 200, 500];
 const STATUSES = ['pending', 'approved', 'rejected'];
+const PRIZE_TIERS = [50, 100, 200, 500];
+const DEFAULT_PRIZES = Object.fromEntries(PRIZE_TIERS.map((tier) => [tier, { first: 0, second: 0, third: 0 }]));
 
 export default function AdminDashboard() {
   const [entries, setEntries] = useState([]);
@@ -21,6 +25,52 @@ export default function AdminDashboard() {
   const [tierFilter, setTierFilter] = useState('all');
   const [activeReceiptUrl, setActiveReceiptUrl] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
+  const [prizeAmounts, setPrizeAmounts] = useState(DEFAULT_PRIZES);
+  const [prizesLoading, setPrizesLoading] = useState(true);
+  const [prizesSaving, setPrizesSaving] = useState(false);
+  const [prizesMessage, setPrizesMessage] = useState('');
+
+  useEffect(() => {
+    const loadPrizes = async () => {
+      try {
+        const snapshot = await getDoc(doc(db, 'settings', 'prizes'));
+        if (snapshot.exists()) {
+          setPrizeAmounts({ ...DEFAULT_PRIZES, ...snapshot.data().prizeAmounts });
+        }
+      } catch (error) {
+        console.error('Prize settings error:', error);
+      } finally {
+        setPrizesLoading(false);
+      }
+    };
+
+    loadPrizes();
+  }, []);
+
+  const updatePrize = (tier, place, value) => {
+    setPrizeAmounts((current) => ({
+      ...current,
+      [tier]: { ...current[tier], [place]: value },
+    }));
+  };
+
+  const savePrizes = async (event) => {
+    event.preventDefault();
+    setPrizesSaving(true);
+    setPrizesMessage('');
+    try {
+      await setDoc(doc(db, 'settings', 'prizes'), {
+        prizeAmounts,
+        updatedAt: new Date(),
+      });
+      setPrizesMessage('Prize amounts saved. Users will see the new values after refresh.');
+    } catch (error) {
+      console.error('Prize settings save error:', error);
+      setPrizesMessage('Could not save prize amounts. Check your connection.');
+    } finally {
+      setPrizesSaving(false);
+    }
+  };
 
   // 1. Fetch Entries in Real-Time
   useEffect(() => {
@@ -136,6 +186,32 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      <form onSubmit={savePrizes} className="mb-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+          <div>
+            <h2 className="text-lg font-black text-gray-900">Winner prize amounts</h2>
+            <p className="mt-1 text-xs text-gray-500">Set the first, second, and third win amounts for every category.</p>
+          </div>
+          <button disabled={prizesLoading || prizesSaving} className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white transition hover:bg-slate-700 disabled:opacity-50">
+            {prizesSaving ? 'Saving...' : 'Save prize amounts'}
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {PRIZE_TIERS.map((tier) => (
+            <div key={tier} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+              <p className="mb-3 text-sm font-black text-gray-900">{tier} Birr category</p>
+              {['first', 'second', 'third'].map((place) => (
+                <label key={place} className="mb-2 flex items-center justify-between gap-2 text-xs font-bold capitalize text-gray-500">
+                  {place} win
+                  <input type="number" min="0" required value={prizeAmounts[tier]?.[place] ?? 0} onChange={(event) => updatePrize(tier, place, Number(event.target.value))} className="w-24 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-right text-sm font-bold text-gray-900 outline-none focus:border-cyan-500" />
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+        {prizesMessage && <p className="mt-3 text-xs font-semibold text-cyan-700">{prizesMessage}</p>}
+      </form>
 
       {/* Data Table / List */}
       {loading ? (

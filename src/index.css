@@ -1,3 +1,67 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@layer base {
+	:root {
+		font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+		color: #10162b;
+		background: #f7f8fc;
+		font-synthesis: none;
+		text-rendering: optimizeLegibility;
+	}
+
+	body {
+		min-width: 320px;
+		min-height: 100vh;
+		margin: 0;
+		background:
+			radial-gradient(circle at 8% 0%, rgba(34, 211, 238, 0.14), transparent 28rem),
+			radial-gradient(circle at 92% 10%, rgba(251, 191, 36, 0.14), transparent 24rem),
+			#f7f8fc;
+	}
+
+	button,
+	input {
+		font: inherit;
+	}
+}
+
+@layer components {
+	.app-shell {
+		min-height: 100vh;
+		background: transparent;
+	}
+
+	.app-nav {
+		background: rgba(11, 16, 32, 0.92);
+		backdrop-filter: blur(18px);
+	}
+
+	.brand-mark {
+		font-family: 'Space Grotesk', sans-serif;
+		letter-spacing: 0.08em;
+	}
+
+	.auth-visual {
+		background:
+			radial-gradient(circle at 50% 20%, rgba(34, 211, 238, 0.24), transparent 18rem),
+			linear-gradient(145deg, #101a42 0%, #11122b 52%, #250f3e 100%);
+	}
+
+	.auth-title,
+	h1,
+	h2,
+	h3 {
+		font-family: 'Space Grotesk', 'DM Sans', sans-serif;
+	}
+
+	.pill-button {
+		border-radius: 999px;
+		transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+	}
+
+	.pill-button:hover {
+		filter: saturate(1.1);
+		transform: translateY(-2px);
+	}
+}

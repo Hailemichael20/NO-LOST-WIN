@@ -1,30 +1,61 @@
-import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth, isFirebaseConfigured } from './firebaseConfig';
 
 // Import your page components
 import LotteryRegistration from './components/LotteryRegistration';
 import LotteryWheel from './components/LotteryWheel';
 import AdminDashboard from './components/AdminDashboard';
+import AuthPage from './components/AuthPage';
 
 export default function App() {
+  const [user, setUser] = useState(undefined);
+
+  useEffect(() => onAuthStateChanged(auth, setUser), []);
+
+  if (!isFirebaseConfigured) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6">
+        <div className="max-w-md rounded-3xl bg-white p-8 text-center shadow-xl">
+          <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-700">ETHIO-DRAW</p>
+          <h1 className="mt-3 text-2xl font-black text-slate-950">Firebase setup required</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-500">Replace the placeholder values in <strong>.env.local</strong> with your Firebase web app configuration, then restart the Vite server.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (user === undefined) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6 text-center">
+        <div className="rounded-3xl bg-white p-8 shadow-xl">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
+          <p className="font-bold text-slate-900">Loading Ethio-Draw...</p>
+          <p className="mt-2 text-sm text-slate-500">Connecting to your account</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Router>
-      <div className="min-h-screen bg-slate-100 font-sans text-slate-900 flex flex-col">
-        {/* Navigation Bar */}
-        <Navbar />
+      <div className="app-shell flex flex-col font-sans text-slate-900">
+        <Navbar user={user} />
 
         {/* Main Content Area */}
-        <main className="flex-grow container mx-auto px-4 py-6">
+        <main className="container mx-auto w-full flex-grow px-4 py-8 sm:px-6 sm:py-12">
           <Routes>
-            <Route path="/" element={<LotteryRegistration />} />
-            <Route path="/wheel" element={<LotteryWheel />} />
+            <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage />} />
+            <Route path="/draw" element={user ? <LotteryRegistration user={user} /> : <Navigate to="/" replace />} />
+            <Route path="/wheel" element={user ? <LotteryWheel /> : <Navigate to="/" replace />} />
             <Route path="/admin" element={<AdminGuard />} />
           </Routes>
         </main>
 
         {/* Footer */}
-        <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
-          © {new Date().getFullYear()} Official Draw Platform. All rights reserved.
+        <footer className="border-t border-slate-200/70 py-6 text-center text-xs font-medium text-slate-400">
+          © {new Date().getFullYear()} ETHIO-DRAW · Fila Draw
         </footer>
       </div>
     </Router>
@@ -32,38 +63,25 @@ export default function App() {
 }
 
 // Header Navigation Component
-function Navbar() {
+function Navbar({ user }) {
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut(auth);
+    navigate('/');
+  };
+
   return (
-    <header className="bg-slate-900 text-white shadow-md sticky top-0 z-40">
+    <header className="app-nav sticky top-0 z-40 text-white shadow-lg shadow-slate-950/10">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         {/* Brand Logo / Title */}
-        <Link to="/" className="flex items-center gap-2 font-black text-lg tracking-wider text-amber-400">
-          <span>🎰</span> ETHIO-DRAW
+        <Link to="/" className="brand-mark flex items-center gap-3 text-sm font-bold text-amber-300 sm:text-base">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-orange-500 text-base text-slate-950 shadow-lg shadow-orange-500/20">✦</span>
+          <span><strong>ETHIO-DRAW</strong><small className="ml-2 font-medium text-slate-400">Fila Draw</small></span>
         </Link>
 
         {/* Nav Links */}
-        <nav className="flex gap-1 md:gap-3">
-          <Link
-            to="/"
-            className="px-3 py-2 rounded-xl text-xs md:text-sm font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          >
-            Enter Draw
-          </Link>
-
-          <Link
-            to="/wheel"
-            className="px-3 py-2 rounded-xl text-xs md:text-sm font-bold text-amber-400 hover:bg-amber-400/10 transition"
-          >
-            Live Wheel
-          </Link>
-
-          <Link
-            to="/admin"
-            className="px-3 py-2 rounded-xl text-xs md:text-sm font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition"
-          >
-            Admin
-          </Link>
-        </nav>
+        {user && <button onClick={handleSignOut} className="pill-button bg-white/10 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-white/20 sm:text-sm">Log out</button>}
       </div>
     </header>
   );
