@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /entries/{entryId} {
+      // Anyone can submit an entry
+      allow create: if request.resource.data.status == 'pending';
+      // Only admins should read/update (we'll enforce via admin panel or auth)
+      allow read, update, delete: if request.auth != null; 
+    }
+  }
+}
