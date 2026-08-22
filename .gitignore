@@ -47,6 +47,10 @@ build/Release
 # Dependency directories
 node_modules/
 
+# Production build output
+dist/
+build/
+
 # Optional npm cache directory
 .npm
 
@@ -62,8 +66,8 @@ node_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variables file
-.env
+# dotenv environment variable files
+.env*
 
 # dataconnect generated files
 .dataconnect
