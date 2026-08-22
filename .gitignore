@@ -68,6 +68,7 @@ build/
 
 # dotenv environment variable files
 .env*
+!.env.example
 
 # dataconnect generated files
 .dataconnect
