@@ -13,9 +13,17 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || import.meta.env.REACT_APP_FIREBASE_MEASUREMENT_ID
 };
 
-export const isFirebaseConfigured = Object.values(firebaseConfig).every((value) => value && !value.includes('your-app') && !value.includes('...'));
+const requiredConfig = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
-export const auth = getAuth(app);
+export const isFirebaseConfigured = requiredConfig.every((key) => {
+  const value = firebaseConfig[key];
+  return typeof value === 'string'
+    && value.length > 0
+    && !value.includes('your-')
+    && !value.includes('...');
+});
+
+const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
+export const db = app ? getFirestore(app) : null;
+export const storage = app ? getStorage(app) : null;
+export const auth = app ? getAuth(app) : null;

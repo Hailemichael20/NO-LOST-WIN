@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebaseConfig';
@@ -11,8 +11,28 @@ import AuthPage from './components/AuthPage';
 
 export default function App() {
   const [user, setUser] = useState(undefined);
+  const [timeoutExceeded, setTimeoutExceeded] = useState(false);
 
-  useEffect(() => onAuthStateChanged(auth, setUser), []);
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+
+    // Set a timeout to show loading message after 5 seconds
+    const timeout = setTimeout(() => setTimeoutExceeded(true), 5000);
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u || null);
+      clearTimeout(timeout);
+    }, (error) => {
+      console.error('Auth error:', error);
+      setUser(null);
+      clearTimeout(timeout);
+    });
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
+  }, []);
 
   if (!isFirebaseConfigured) {
     return (
@@ -29,10 +49,15 @@ export default function App() {
   if (user === undefined) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6 text-center">
-        <div className="rounded-3xl bg-white p-8 shadow-xl">
+        <div className="rounded-3xl bg-white p-8 shadow-xl max-w-sm">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
           <p className="font-bold text-slate-900">Loading Ethio-Draw...</p>
           <p className="mt-2 text-sm text-slate-500">Connecting to your account</p>
+          {timeoutExceeded && (
+            <p className="mt-4 text-xs text-orange-600 font-semibold">
+              ⚠️ Taking longer than expected. Please check your internet connection.
+            </p>
+          )}
         </div>
       </div>
     );
