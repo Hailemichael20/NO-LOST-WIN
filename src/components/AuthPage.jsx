@@ -120,7 +120,15 @@ export default function AuthPage() {
 }
 
 function AuthShell({ children }) {
-  return <section className="mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-soft"><div className="auth-visual flex min-h-[22rem] flex-col items-center justify-center px-6 py-12 text-center text-white sm:min-h-[27rem] sm:px-12"><p className="text-xs font-black uppercase tracking-[0.3em] text-cyan-300">ETHIO-DRAW</p><h1 className="auth-title mt-5 text-6xl font-bold leading-none sm:text-8xl">ETHIO-DRAW</h1><p className="mt-4 text-xl font-semibold text-amber-300 sm:text-2xl">Fila Draw</p><p className="mt-5 max-w-md text-base text-slate-300 sm:text-lg">Welcome! Make a wish and play.</p><div className="mt-8 h-1 w-20 rounded-full bg-gradient-to-r from-cyan-300 to-amber-300" /></div><div className="w-full p-6 sm:p-12">{children}</div></section>;
+  const [language, setLanguage] = useState(() => localStorage.getItem('ethio-draw-language') || 'en');
+
+  const handleLanguageChange = (event) => {
+    const nextLanguage = event.target.value;
+    setLanguage(nextLanguage);
+    localStorage.setItem('ethio-draw-language', nextLanguage);
+  };
+
+  return <section className="mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] bg-white shadow-soft"><div className="auth-visual flex min-h-[22rem] flex-col items-center justify-center px-6 py-12 text-center text-white sm:min-h-[27rem] sm:px-12"><p className="text-xs font-black uppercase tracking-[0.3em] text-cyan-300">ETHIO-DRAW</p><h1 className="auth-title mt-5 text-6xl font-bold leading-none sm:text-8xl">ETHIO-DRAW</h1><p className="mt-4 text-xl font-semibold text-amber-300 sm:text-2xl">Fila Draw</p><p className="mt-5 max-w-md text-base text-slate-300 sm:text-lg">Welcome! Make a wish and play.</p><div className="mt-8 h-1 w-20 rounded-full bg-gradient-to-r from-cyan-300 to-amber-300" /></div><div className="w-full p-6 sm:p-12"><div className="mb-6 flex items-center justify-end gap-3"><label htmlFor="language-preference" className="text-xs font-bold text-slate-500">Language</label><select id="language-preference" value={language} onChange={handleLanguageChange} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-cyan-400"><option value="en">English</option><option value="am">አማርኛ</option></select></div>{children}</div></section>;
 }
 
 function AuthHeader({ eyebrow, title, copy }) {

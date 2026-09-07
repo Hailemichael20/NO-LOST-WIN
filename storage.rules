@@ -2,10 +2,7 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.email == 'YOUR_EMAIL@example.com' ||
-        request.auth.token.email == 'SUPPORTER_EMAIL@example.com'
-      );
+      return request.auth != null && request.auth.token.admin == true;
     }
 
     match /receipts/{userId}/{fileName} {

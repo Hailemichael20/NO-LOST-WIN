@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { db, storage } from '../firebaseConfig';
+import { auth, db, paymentConfig, storage } from '../firebaseConfig';
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 
@@ -83,7 +83,14 @@ export default function LotteryRegistration({ user }) {
       }, async () => {
         try {
           const receiptUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          await addDoc(collection(db, 'entries'), { userId: user.uid, email: user.email, fullName, phone: phoneNumber, tier: selectedTier, receiptUrl, status: 'pending', createdAt: serverTimestamp() });
+          const entryReference = await addDoc(collection(db, 'entries'), { userId: user.uid, email: user.email, fullName, phone: phoneNumber, tier: selectedTier, receiptUrl, status: 'pending', createdAt: serverTimestamp() });
+          const idToken = await auth.currentUser.getIdToken();
+          const notificationResponse = await fetch('/api/notify-receipt', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entryId: entryReference.id }),
+          });
+          if (!notificationResponse.ok) console.warn('Receipt saved, but Telegram notification was not sent.');
           setIsSuccess(true);
         } catch (submitError) {
           console.error(submitError);
@@ -127,7 +134,8 @@ function RegisteredList({ amount, participants, loading }) {
 }
 
 function PaymentPanel({ amount, onDone }) {
-  return <div className="rounded-[1.75rem] bg-white p-6 shadow-xl shadow-slate-900/5"><p className="text-xs font-black uppercase tracking-[0.2em] text-orange-600">Step 2</p><h2 className="mt-2 text-2xl font-black text-slate-950">Complete payment</h2><p className="mt-2 text-sm leading-6 text-slate-500">Transfer <strong className="text-slate-950">{amount} Birr</strong>, then come back here and upload the confirmation photo.</p><div className="my-6 space-y-3 rounded-2xl bg-orange-50 p-4 text-sm text-orange-950"><p><strong>Telebirr</strong><br /><span className="font-mono font-bold">0911XXXXXX</span></p><p><strong>CBE</strong><br /><span className="font-mono font-bold">1000XXXXXXXXX</span></p></div><button onClick={onDone} className="w-full rounded-2xl bg-orange-500 py-3.5 text-sm font-bold text-white transition hover:bg-orange-600">I have completed payment</button></div>;
+  const paymentReady = paymentConfig.telebirr || paymentConfig.cbe;
+  return <div className="rounded-[1.75rem] bg-white p-6 shadow-xl shadow-slate-900/5"><p className="text-xs font-black uppercase tracking-[0.2em] text-orange-600">Step 2</p><h2 className="mt-2 text-2xl font-black text-slate-950">Complete payment</h2><p className="mt-2 text-sm leading-6 text-slate-500">Transfer <strong className="text-slate-950">{amount} Birr</strong>, then come back here and upload the confirmation photo.</p>{paymentReady ? <div className="my-6 space-y-3 rounded-2xl bg-orange-50 p-4 text-sm text-orange-950">{paymentConfig.telebirr && <p><strong>Telebirr</strong><br /><span className="font-mono font-bold">{paymentConfig.telebirr}</span></p>}{paymentConfig.cbe && <p><strong>CBE</strong><br /><span className="font-mono font-bold">{paymentConfig.cbe}</span></p>}</div> : <p className="my-6 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">Payment details are not configured yet. Please contact the administrator.</p>}<button disabled={!paymentReady} onClick={onDone} className="w-full rounded-2xl bg-orange-500 py-3.5 text-sm font-bold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">I have completed payment</button></div>;
 }
 
 function ReceiptForm({ fullName, setFullName, phoneNumber, setPhoneNumber, handleFileChange, filePreview, handleSubmit, loading, uploadProgress }) {

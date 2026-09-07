@@ -1,6 +1,6 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebaseConfig';
 
 // Import your page components
@@ -74,7 +74,7 @@ export default function App() {
             <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage />} />
             <Route path="/draw" element={user ? <LotteryRegistration user={user} /> : <Navigate to="/" replace />} />
             <Route path="/wheel" element={user ? <LotteryWheel /> : <Navigate to="/" replace />} />
-            <Route path="/admin" element={<AdminGuard />} />
+            <Route path="/admin" element={user ? <AdminGuard /> : <Navigate to="/" replace />} />
           </Routes>
         </main>
 
@@ -114,49 +114,30 @@ function Navbar({ user }) {
 
 // Simple Admin Access Gatekeeper
 function AdminGuard() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [isAdmin, setIsAdmin] = useState(null);
 
-  // Replace with your preferred secret admin code
-  const ADMIN_SECRET = 'admin123';
+  useEffect(() => {
+    let active = true;
+    getIdTokenResult(auth.currentUser, true)
+      .then(({ claims }) => {
+        if (active) setIsAdmin(claims.admin === true);
+      })
+      .catch(() => {
+        if (active) setIsAdmin(false);
+      });
+    return () => { active = false; };
+  }, []);
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (password === ADMIN_SECRET) {
-      setIsAuthenticated(true);
-      setError('');
-    } else {
-      setError('Incorrect passcode');
-    }
-  };
+  if (isAdmin === null) {
+    return <div className="mx-auto my-16 max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">Checking admin access...</div>;
+  }
 
-  if (!isAuthenticated) {
+  if (!isAdmin) {
     return (
-      <div className="max-w-sm mx-auto my-16 p-6 bg-white rounded-2xl shadow-xl border border-slate-200 text-center">
-        <div className="w-12 h-12 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto mb-3 font-bold text-xl">
-          🔒
-        </div>
-        <h2 className="text-xl font-bold text-slate-800 mb-1">Admin Passcode</h2>
-        <p className="text-xs text-slate-500 mb-4">Enter passcode to access the verification dashboard</p>
-
-        {error && <p className="text-xs text-red-500 font-bold mb-3">{error}</p>}
-
-        <form onSubmit={handleLogin} className="space-y-3">
-          <input
-            type="password"
-            placeholder="Enter passcode"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-800"
-          />
-          <button
-            type="submit"
-            className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition"
-          >
-            Unlock Dashboard
-          </button>
-        </form>
+      <div className="mx-auto my-16 max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-xl">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-xl font-bold text-red-600">!</div>
+        <h2 className="mb-1 text-xl font-bold text-slate-800">Admin access required</h2>
+        <p className="text-xs text-slate-500">Your account is signed in, but it has not been granted the admin role.</p>
       </div>
     );
   }

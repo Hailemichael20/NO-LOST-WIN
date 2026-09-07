@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebaseConfig'; // Import your firebaseConfig
+import { auth, db } from '../firebaseConfig';
 import { 
   collection, 
   query, 
@@ -29,6 +29,7 @@ export default function AdminDashboard() {
   const [prizesLoading, setPrizesLoading] = useState(true);
   const [prizesSaving, setPrizesSaving] = useState(false);
   const [prizesMessage, setPrizesMessage] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
 
   useEffect(() => {
     const loadPrizes = async () => {
@@ -106,15 +107,26 @@ export default function AdminDashboard() {
   // 2. Approve or Reject Entry Status
   const handleUpdateStatus = async (id, newStatus) => {
     setUpdatingId(id);
+    setActionMessage('');
     try {
-      const entryRef = doc(db, 'entries', id);
-      await updateDoc(entryRef, {
-        status: newStatus,
-        reviewedAt: new Date()
-      });
+      if (newStatus === 'approved') {
+        const idToken = await auth.currentUser.getIdToken();
+        const response = await fetch('/api/approve-receipt', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entryId: id }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Receipt approval failed.');
+        setActionMessage(`Receipt approved. Wallet credited ${result.amount} Birr.`);
+      } else {
+        const entryRef = doc(db, 'entries', id);
+        await updateDoc(entryRef, { status: newStatus, reviewedAt: new Date() });
+        setActionMessage('Receipt rejected. No wallet balance was changed.');
+      }
     } catch (err) {
       console.error(`Failed to update status to ${newStatus}:`, err);
-      alert("Error updating status. Check connection.");
+      setActionMessage(err.message || 'The receipt action failed. Check your connection.');
     } finally {
       setUpdatingId(null);
     }
@@ -146,6 +158,8 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {actionMessage && <p className="mb-5 rounded-2xl bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800">{actionMessage}</p>}
 
       {/* Control Toolbar (Status & Tier Filters) */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 mb-6 flex flex-wrap justify-between gap-4">

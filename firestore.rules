@@ -1,8 +1,40 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == userId);
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && !('winBirrBalance' in request.resource.data);
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullName', 'phone']);
+    }
+
+    match /entries/{entryId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.tier in [50, 100, 200, 500];
+      allow read: if isAdmin() || (request.auth != null && resource.data.userId == request.auth.uid) || resource.data.status == 'approved';
+      allow update: if isAdmin()
+        && request.resource.data.status == 'rejected'
+        && resource.data.status == 'pending';
+      allow delete: if isAdmin();
+    }
+
+    match /walletTransactions/{transactionId} {
+      allow read: if isAdmin() || (request.auth != null && resource.data.userId == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
   }
 }
