@@ -28,14 +28,23 @@ Receipt approval is handled by the `approveReceipt` callable function in `functi
 
 ## Telegram receipt alerts through Vercel
 
-The Vercel endpoint at `/api/notify-receipt` sends a Telegram alert after a signed-in user uploads a receipt. The `/api/approve-receipt` endpoint securely performs the administrator approval and wallet transaction, so Firebase Cloud Functions are not required. Create a Telegram bot with `@BotFather`, send it one message from your Telegram account, and get your numeric chat ID. Deploy this repository to Vercel and add these Vercel environment variables for Production, Preview, and Development:
+The Vercel endpoint at `/api/notify-receipt` sends a Telegram alert after a signed-in user uploads a receipt. The `/api/approve-receipt` endpoint securely performs the administrator approval and wallet transaction, so Firebase Cloud Functions are not required. Create a Telegram bot with `@BotFather`, send it one message from your Telegram account, and get your numeric chat ID.
+
+### Step-by-step Vercel setup
+
+1. Push this project to GitHub.
+2. Open Vercel and import the repository.
+3. In Project Settings → Environment Variables, add the following variables for Production, Preview, and Development:
 
 ```text
-TELEGRAM_BOT_TOKEN
-TELEGRAM_CHAT_ID
-FIREBASE_PROJECT_ID
-FIREBASE_CLIENT_EMAIL
-FIREBASE_PRIVATE_KEY
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+TELEGRAM_CHAT_ID=your-telegram-chat-id
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CLIENT_EMAIL=your-firebase-service-account-email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
+
+4. Deploy the project.
+5. Confirm your bot can send messages by testing the receipt upload flow.
 
 The Firebase service-account values are server-only Vercel variables. Do not add them to browser-exposed `VITE_` variables. `FIREBASE_PRIVATE_KEY` must preserve newlines or use `\\n` sequences. This alert is sent to you for review; it does not approve or credit the wallet. Wallet credit still requires administrator approval in the admin dashboard.
