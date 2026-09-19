@@ -12,6 +12,17 @@ const TIERS = [
 ];
 const DEFAULT_PRIZES = Object.fromEntries(TIERS.map(({ amount }) => [amount, { first: 0, second: 0, third: 0 }]));
 
+const requestWithTimeout = async (url, options = {}, timeoutMs = 5000) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 export default function LotteryRegistration({ user }) {
   const [step, setStep] = useState('categories');
   const [selectedTier, setSelectedTier] = useState(null);
@@ -69,44 +80,92 @@ export default function LotteryRegistration({ user }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+
+    if (!auth || !db || !storage) {
+      setError('Firebase is not configured correctly. Please add your app settings and reload the page.');
+      return;
+    }
+    if (!auth.currentUser) {
+      setError('Please sign in before uploading a receipt.');
+      return;
+    }
+    if (!selectedTier) {
+      setError('Please choose a ticket category before submitting your receipt.');
+      return;
+    }
     if (!fullName || !phoneNumber || !receiptFile) return setError('Add your name, phone number, and payment receipt.');
+
     setLoading(true);
     setError('');
+    setUploadProgress(0);
+
     try {
-      const extension = receiptFile.name.split('.').pop();
+      const extension = receiptFile.name.split('.').pop() || 'jpg';
       const storageRef = ref(storage, `receipts/${user.uid}/${Date.now()}.${extension}`);
       const uploadTask = uploadBytesResumable(storageRef, receiptFile);
-      uploadTask.on('state_changed', (snapshot) => setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), (uploadError) => {
-        console.error(uploadError);
-        setError('Failed to upload receipt. Please try again.');
-        setLoading(false);
-      }, async () => {
+
+      await new Promise((resolve, reject) => {
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+          },
+          (uploadError) => {
+            console.error(uploadError);
+            reject(uploadError);
+          },
+          () => resolve()
+        );
+      });
+
+      const receiptUrl = await getDownloadURL(uploadTask.snapshot.ref);
+      const entryReference = await addDoc(collection(db, 'entries'), {
+        userId: user.uid,
+        email: user.email,
+        fullName,
+        phone: phoneNumber,
+        tier: selectedTier,
+        receiptUrl,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+
+      if (auth.currentUser) {
         try {
-          const receiptUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          const entryReference = await addDoc(collection(db, 'entries'), { userId: user.uid, email: user.email, fullName, phone: phoneNumber, tier: selectedTier, receiptUrl, status: 'pending', createdAt: serverTimestamp() });
           const idToken = await auth.currentUser.getIdToken();
-          const notificationResponse = await fetch('/api/notify-receipt', {
+          const notificationResponse = await requestWithTimeout('/api/notify-receipt', {
             method: 'POST',
             headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ entryId: entryReference.id }),
-          });
-          if (!notificationResponse.ok) console.warn('Receipt saved, but Telegram notification was not sent.');
-          setIsSuccess(true);
-        } catch (submitError) {
-          console.error(submitError);
-          setError('Could not save your registration. Please try again.');
-        } finally {
-          setLoading(false);
+          }, 5000);
+
+          if (!notificationResponse.ok) {
+            console.warn('Receipt saved, but Telegram notification was not sent.');
+          }
+        } catch (notifyError) {
+          console.warn('Receipt saved, but Telegram notification request timed out or failed.', notifyError);
         }
-      });
+      }
+
+      setReceiptFile(null);
+      setFilePreview(null);
+      setIsSuccess(true);
     } catch (submitError) {
       console.error(submitError);
       setError('Could not submit your receipt. Please try again.');
+    } finally {
       setLoading(false);
+      setUploadProgress(100);
     }
   };
 
-  if (isSuccess) return <SuccessMessage amount={selectedTier} onReset={() => { setIsSuccess(false); setStep('categories'); }} />;
+  if (isSuccess) return <SuccessMessage amount={selectedTier} onReset={() => {
+    setIsSuccess(false);
+    setStep('categories');
+    setReceiptFile(null);
+    setFilePreview(null);
+    setUploadProgress(0);
+  }} />;
 
   return (
     <section className="mx-auto max-w-5xl">

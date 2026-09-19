@@ -1,54 +1,65 @@
 import React, { useState } from 'react';
-import { db } from './firebase'; // Adjust path if firebase.js is in another folder
-import { collection, addDoc } from 'firebase/firestore';
+import { auth, db, storage } from '../firebaseConfig';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
 
-// --- YOUR EXISTING FUNCTION (WITH YOUR UPDATED DETAILS) ---
-const uploadReceipt = async (file) => {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", "play-win-receipt"); // <--- Updated preset name
-
-  // <--- Replace YOUR_CLOUD_NAME with your actual Cloudinary cloud name below
-  const response = await fetch("https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/image/upload", {
-    method: "POST",
-    body: formData,
-  });
-
-  const data = await response.json();
-
-  // Return the image URL to store in Firestore
-  return data.secure_url;
-};
-
-// --- COMPONENT THAT USES THE FUNCTION ABOVE ---
 export default function UploadReceipt() {
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
 
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
+  const handleFileChange = async (event) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
+    if (!auth || !db || !storage) {
+      setError('Firebase is not configured correctly. Please configure the app settings and reload the page.');
+      return;
+    }
+    if (!auth.currentUser) {
+      setError('Please sign in before uploading a receipt.');
+      return;
+    }
+
     setLoading(true);
+    setError('');
+    setProgress(0);
 
     try {
-      // 1. Upload to Cloudinary using your function
-      const imageUrl = await uploadReceipt(file);
+      const extension = file.name.split('.').pop() || 'jpg';
+      const storageRef = ref(storage, `receipts/${auth.currentUser.uid}/${Date.now()}.${extension}`);
+      const uploadTask = uploadBytesResumable(storageRef, file);
 
-      if (!imageUrl) {
-        throw new Error("Failed to get image URL from Cloudinary.");
-      }
-
-      // 2. Save the URL to Firestore
-      await addDoc(collection(db, "orders"), {
-        receiptUrl: imageUrl,
-        createdAt: new Date(),
-      });
-
-      alert("Receipt uploaded and saved successfully!");
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => setProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)),
+        (uploadError) => {
+          console.error('Upload failed:', uploadError);
+          setError('Receipt upload failed. Please try again.');
+          setLoading(false);
+        },
+        async () => {
+          try {
+            const receiptUrl = await getDownloadURL(uploadTask.snapshot.ref);
+            await addDoc(collection(db, 'entries'), {
+              userId: auth.currentUser.uid,
+              email: auth.currentUser.email,
+              receiptUrl,
+              status: 'pending',
+              createdAt: serverTimestamp(),
+            });
+            alert('Receipt uploaded and saved successfully!');
+          } catch (submitError) {
+            console.error('Save failed:', submitError);
+            setError('Receipt uploaded but could not be saved.');
+          } finally {
+            setLoading(false);
+          }
+        }
+      );
     } catch (error) {
-      console.error("Error uploading receipt:", error);
-      alert("Upload failed! Check the browser console for details.");
-    } finally {
+      console.error('Error uploading receipt:', error);
+      setError('Upload failed. Check the browser console for details.');
       setLoading(false);
     }
   };
@@ -56,13 +67,9 @@ export default function UploadReceipt() {
   return (
     <div style={{ padding: '20px' }}>
       <h3>Upload Receipt</h3>
-      <input 
-        type="file" 
-        accept="image/*" 
-        onChange={handleFileChange} 
-        disabled={loading} 
-      />
-      {loading && <p>Uploading receipt...</p>}
+      <input type="file" accept="image/*" onChange={handleFileChange} disabled={loading} />
+      {loading && <p>Uploading receipt... {progress}%</p>}
+      {error && <p style={{ color: 'crimson' }}>{error}</p>}
     </div>
   );
 }
