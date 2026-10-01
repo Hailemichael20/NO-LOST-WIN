@@ -36,7 +36,22 @@ Create a Telegram bot with `@BotFather`, send it one message from your Telegram 
 
 ### Vercel environment variables
 
-In Vercel Project Settings → Environment Variables, add these server-only values for the environments you deploy:
+In Vercel Project Settings → Environment Variables, add the Firebase web app values for **Production**. Add them to Preview or Development too if those deployments are used:
+
+```text
+VITE_FIREBASE_API_KEY=your-firebase-api-key
+VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
+VITE_FIREBASE_APP_ID=your-app-id
+VITE_FIREBASE_MEASUREMENT_ID=your-measurement-id
+```
+
+Get these values from Firebase Console → Project settings → General → Your apps → Web app config. They are browser configuration, not service-account secrets. Vite embeds them at build time, so save them before redeploying. `VITE_FIREBASE_STORAGE_BUCKET` is not required because receipt files use Cloudinary.
+
+For the frontend and API on the same Vercel domain, leave `VITE_API_BASE_URL` unset. Set it only when the frontend must call an API hosted on a different origin.
+
+Add these server-only values for the environments you deploy:
 
 ```text
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
