@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { auth, db, paymentConfig, storage } from '../firebaseConfig';
+import { auth, db, paymentConfig } from '../firebaseConfig';
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, where } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytesResumable } from 'firebase/storage';
+import { apiBaseUrl, uploadReceiptImage } from '../cloudinaryUpload';
 
 const TIERS = [
   { amount: 50, icon: '◈', label: 'Starter', color: 'from-cyan-500 to-blue-600' },
@@ -71,7 +71,7 @@ export default function LotteryRegistration({ user }) {
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) return setError('Please upload a JPG or PNG image.');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return setError('Please upload a JPG, PNG, or WebP image.');
     if (file.size > 5 * 1024 * 1024) return setError('Receipt image must be under 5MB.');
     setError('');
     setReceiptFile(file);
@@ -81,7 +81,7 @@ export default function LotteryRegistration({ user }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (!auth || !db || !storage) {
+    if (!auth || !db) {
       setError('Firebase is not configured correctly. Please add your app settings and reload the page.');
       return;
     }
@@ -100,25 +100,7 @@ export default function LotteryRegistration({ user }) {
     setUploadProgress(0);
 
     try {
-      const extension = receiptFile.name.split('.').pop() || 'jpg';
-      const storageRef = ref(storage, `receipts/${user.uid}/${Date.now()}.${extension}`);
-      const uploadTask = uploadBytesResumable(storageRef, receiptFile);
-
-      await new Promise((resolve, reject) => {
-        uploadTask.on(
-          'state_changed',
-          (snapshot) => {
-            setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
-          },
-          (uploadError) => {
-            console.error(uploadError);
-            reject(uploadError);
-          },
-          () => resolve()
-        );
-      });
-
-      const receiptUrl = await getDownloadURL(uploadTask.snapshot.ref);
+      const receiptUrl = await uploadReceiptImage(receiptFile, setUploadProgress);
       const entryReference = await addDoc(collection(db, 'entries'), {
         userId: user.uid,
         email: user.email,
@@ -133,7 +115,7 @@ export default function LotteryRegistration({ user }) {
       if (auth.currentUser) {
         try {
           const idToken = await auth.currentUser.getIdToken();
-          const notificationResponse = await requestWithTimeout('/api/notify-receipt', {
+          const notificationResponse = await requestWithTimeout(`${apiBaseUrl}/api/notify-receipt`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ entryId: entryReference.id }),
@@ -155,7 +137,6 @@ export default function LotteryRegistration({ user }) {
       setError('Could not submit your receipt. Please try again.');
     } finally {
       setLoading(false);
-      setUploadProgress(100);
     }
   };
 
@@ -198,7 +179,7 @@ function PaymentPanel({ amount, onDone }) {
 }
 
 function ReceiptForm({ fullName, setFullName, phoneNumber, setPhoneNumber, handleFileChange, filePreview, handleSubmit, loading, uploadProgress }) {
-  return <form onSubmit={handleSubmit} className="rounded-[1.75rem] bg-white p-6 shadow-xl shadow-slate-900/5"><p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-700">Step 3</p><h2 className="mt-2 text-2xl font-black text-slate-950">Upload payment photo</h2><div className="mt-6 space-y-4"><label className="block text-sm font-bold text-slate-700">Mobile phone number<input required type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="0912345678" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-500" /></label><label className="block text-sm font-bold text-slate-700">Full name<input required value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-500" /></label><label className="block text-sm font-bold text-slate-700">Payment receipt photo<input required type="file" accept="image/*" onChange={handleFileChange} className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-50 file:px-4 file:py-2.5 file:font-bold file:text-cyan-700" /></label>{filePreview && <img src={filePreview} alt="Payment receipt preview" className="h-40 w-full rounded-2xl border border-slate-100 object-contain" />}{loading && <p className="text-sm font-bold text-cyan-700">Uploading receipt: {uploadProgress}%</p>}<button disabled={loading} className="w-full rounded-2xl bg-slate-950 py-3.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">{loading ? 'Submitting...' : 'Submit registration'}</button></div></form>;
+  return <form onSubmit={handleSubmit} className="rounded-[1.75rem] bg-white p-6 shadow-xl shadow-slate-900/5"><p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-700">Step 3</p><h2 className="mt-2 text-2xl font-black text-slate-950">Upload payment photo</h2><div className="mt-6 space-y-4"><label className="block text-sm font-bold text-slate-700">Mobile phone number<input required type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="0912345678" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-500" /></label><label className="block text-sm font-bold text-slate-700">Full name<input required value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Your full name" className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 outline-none focus:border-cyan-500" /></label><label className="block text-sm font-bold text-slate-700">Payment receipt photo<input required type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-50 file:px-4 file:py-2.5 file:font-bold file:text-cyan-700" /></label>{filePreview && <img src={filePreview} alt="Payment receipt preview" className="h-40 w-full rounded-2xl border border-slate-100 object-contain" />}{loading && <p className="text-sm font-bold text-cyan-700">Uploading receipt: {uploadProgress}%</p>}<button disabled={loading} className="w-full rounded-2xl bg-slate-950 py-3.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">{loading ? 'Submitting...' : 'Submit registration'}</button></div></form>;
 }
 
 function SuccessMessage({ amount, onReset }) {

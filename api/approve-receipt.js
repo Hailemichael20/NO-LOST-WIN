@@ -1,6 +1,7 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { applyCors } from '../lib/cors.js';
 
 function getFirebaseAdminApp() {
   if (getApps().length > 0) return getApps()[0];
@@ -20,6 +21,8 @@ function getFirebaseAdminApp() {
 }
 
 export default async function handler(request, response) {
+  if (!applyCors(request, response)) return;
+  if (request.method === 'OPTIONS') return response.status(204).end();
   if (request.method !== 'POST') return response.status(405).json({ error: 'Method not allowed.' });
 
   try {

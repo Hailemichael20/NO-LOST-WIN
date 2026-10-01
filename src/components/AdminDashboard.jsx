@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '../firebaseConfig';
+import { apiBaseUrl } from '../cloudinaryUpload';
 import { 
   collection, 
   query, 
@@ -111,7 +112,7 @@ export default function AdminDashboard() {
     try {
       if (newStatus === 'approved') {
         const idToken = await auth.currentUser.getIdToken();
-        const response = await fetch('/api/approve-receipt', {
+        const response = await fetch(`${apiBaseUrl}/api/approve-receipt`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ entryId: id }),
