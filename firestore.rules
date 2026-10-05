@@ -1,40 +1,230 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Data model:
+    // users/{uid}: private profile (name, phone); wallet fields are server-managed.
+    // entries/{id}: private payment receipt and wallet-review state.
+    // ticketReservations/{tier-number}: private ticket holder details and two-hour expiry.
+    // ticketBoard/{tier-number}: public-to-authenticated-users ticket, name, status,
+    //   masked phone suffix, and owner UID; never contains a full phone number.
+    // settings/{id}: prize/payment settings and bilingual published announcement.
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
     function isAdmin() {
-      return request.auth != null && request.auth.token.admin == true;
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(['fullName', 'phone', 'createdAt', 'winBirrBalance', 'walletUpdatedAt'])
+        && data.fullName is string
+        && data.fullName.size() > 0
+        && data.fullName.size() <= 100
+        && data.phone is string
+        && data.phone.size() >= 7
+        && data.phone.size() <= 32
+        && (!('createdAt' in data) || data.createdAt is timestamp)
+        && (!('winBirrBalance' in data) || data.winBirrBalance is number)
+        && (!('walletUpdatedAt' in data) || data.walletUpdatedAt is timestamp);
+    }
+
+    function isValidReservation(data) {
+      return data.keys().hasOnly([
+          'ownerUid', 'tier', 'number', 'fullName', 'phone', 'status',
+          'reservedAt', 'expiresAt', 'entryId'
+        ])
+        && data.keys().hasAll([
+          'ownerUid', 'tier', 'number', 'fullName', 'phone', 'status',
+          'reservedAt', 'expiresAt'
+        ])
+        && data.ownerUid is string
+        && data.tier in ['50', '100', '200', '500']
+        && data.number is string
+        && data.number.matches('^[0-9]{3}$')
+        && data.number != '000'
+        && data.fullName is string
+        && data.fullName.size() > 0
+        && data.fullName.size() <= 100
+        && data.phone is string
+        && data.phone.size() >= 7
+        && data.phone.size() <= 32
+        && data.status in ['reserved', 'pending', 'approved', 'rejected']
+        && data.reservedAt is timestamp
+        && (!('entryId' in data) || (data.entryId is string && data.entryId.size() <= 128));
+    }
+
+    function isValidBoard(data) {
+      return data.keys().hasOnly([
+          'ownerUid', 'tier', 'number', 'fullName', 'phoneLast4',
+          'status', 'reservedAt', 'expiresAt'
+        ])
+        && data.keys().hasAll([
+          'ownerUid', 'tier', 'number', 'fullName', 'phoneLast4',
+          'status', 'reservedAt', 'expiresAt'
+        ])
+        && data.ownerUid is string
+        && data.tier in ['50', '100', '200', '500']
+        && data.number is string
+        && data.number.matches('^[0-9]{3}$')
+        && data.number != '000'
+        && data.fullName is string
+        && data.fullName.size() > 0
+        && data.fullName.size() <= 100
+        && data.phoneLast4 is string
+        && data.phoneLast4.size() == 4
+        && data.status in ['reserved', 'pending', 'approved', 'rejected']
+        && data.reservedAt is timestamp;
+    }
+
+    function reservationPath(reservationId) {
+      return /databases/$(database)/documents/ticketReservations/$(reservationId);
+    }
+
+    function validEntry(data) {
+      return data.keys().hasOnly([
+          'entryId', 'userId', 'email', 'fullName', 'phone', 'tier', 'ticketTier', 'number',
+          'ticketReservationId', 'expiresAt', 'receiptUrl', 'status', 'createdAt',
+          'reviewedAt', 'approvedAt', 'approvedBy', 'walletTransactionId',
+          'isWinner', 'wonAt'
+        ])
+        && data.keys().hasAll([
+          'userId', 'fullName', 'phone', 'tier', 'receiptUrl', 'status', 'createdAt'
+        ])
+        && data.userId is string
+        && data.fullName is string
+        && data.fullName.size() > 0
+        && data.fullName.size() <= 100
+        && data.phone is string
+        && data.phone.size() >= 7
+        && data.phone.size() <= 32
+        && data.tier in [50, 100, 200, 500]
+        && data.receiptUrl is string
+        && data.receiptUrl.matches('^https://.+')
+        && data.status in ['pending', 'approved', 'rejected']
+        && data.createdAt is timestamp
+        && (!('entryId' in data) || data.entryId is string)
+        && (!('email' in data) || data.email is string)
+        && (!('number' in data) || (data.number is string && data.number.matches('^[0-9]{3}$') && data.number != '000'))
+        && (!('ticketTier' in data) || data.ticketTier in ['50', '100', '200', '500'])
+        && (!('ticketReservationId' in data) || data.ticketReservationId is string)
+        && (!('expiresAt' in data) || data.expiresAt is timestamp)
+        && (!('reviewedAt' in data) || data.reviewedAt is timestamp)
+        && (!('approvedAt' in data) || data.approvedAt is timestamp)
+        && (!('approvedBy' in data) || data.approvedBy is string)
+        && (!('walletTransactionId' in data) || data.walletTransactionId is string)
+        && (!('isWinner' in data) || data.isWinner is bool)
+        && (!('wonAt' in data) || data.wonAt is timestamp)
+        && (('ticketReservationId' in data
+          && 'ticketTier' in data
+          && data.number is string
+          && data.ticketReservationId == data.ticketTier + '-' + data.number
+          && ((data.tier == 50 && data.ticketTier == '50')
+            || (data.tier == 100 && data.ticketTier == '100')
+            || (data.tier == 200 && data.ticketTier == '200')
+            || (data.tier == 500 && data.ticketTier == '500'))
+          && data.expiresAt is timestamp
+          && existsAfter(reservationPath(data.ticketReservationId))
+          && getAfter(reservationPath(data.ticketReservationId)).data.ownerUid == data.userId
+          && getAfter(reservationPath(data.ticketReservationId)).data.tier == data.ticketTier
+          && getAfter(reservationPath(data.ticketReservationId)).data.number == data.number
+          && getAfter(reservationPath(data.ticketReservationId)).data.entryId == data.entryId
+          && getAfter(reservationPath(data.ticketReservationId)).data.status == data.status
+          && getAfter(reservationPath(data.ticketReservationId)).data.expiresAt == data.expiresAt)
+          || (!('ticketReservationId' in data) && !('number' in data) && !('ticketTier' in data)));
+    }
+
+    function isValidSetting(settingId, data) {
+      return (settingId == 'payment'
+          && data.keys().hasOnly(['telebirr', 'cbe', 'updatedAt'])
+          && data.telebirr is string
+          && data.telebirr.size() <= 40
+          && data.cbe is string
+          && data.cbe.size() <= 60
+          && data.updatedAt is timestamp)
+        || (settingId == 'prizes'
+          && data.keys().hasOnly(['prizeAmounts', 'updatedAt'])
+          && data.prizeAmounts is map
+          && data.updatedAt is timestamp)
+        || (settingId == 'announcement'
+          && data.keys().hasOnly([
+            'titleEn', 'bodyEn', 'titleAm', 'bodyAm', 'published', 'updatedAt'
+          ])
+          && data.titleEn is string
+          && data.titleEn.size() <= 120
+          && data.bodyEn is string
+          && data.bodyEn.size() <= 4000
+          && data.titleAm is string
+          && data.titleAm.size() <= 120
+          && data.bodyAm is string
+          && data.bodyAm.size() <= 4000
+          && data.published is bool
+          && data.updatedAt is timestamp);
     }
 
     match /users/{userId} {
-      allow read: if isAdmin() || (request.auth != null && request.auth.uid == userId);
-      allow create: if request.auth != null
-        && request.auth.uid == userId
-        && !('winBirrBalance' in request.resource.data);
-      allow update: if request.auth != null
-        && request.auth.uid == userId
+      allow read: if isAdmin() || isOwner(userId);
+      allow create: if isOwner(userId)
+        && isValidUser(request.resource.data)
+        && request.resource.data.keys().hasOnly(['fullName', 'phone', 'createdAt'])
+        && request.resource.data.createdAt is timestamp;
+      allow update: if isOwner(userId)
+        && isValidUser(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullName', 'phone']);
-    }
-
-    match /entries/{entryId} {
-      allow create: if request.auth != null
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.status == 'pending'
-        && request.resource.data.tier in [50, 100, 200, 500];
-      allow read: if isAdmin() || (request.auth != null && resource.data.userId == request.auth.uid) || resource.data.status == 'approved';
-      allow update: if isAdmin()
-        && request.resource.data.status == 'rejected'
-        && resource.data.status == 'pending';
       allow delete: if isAdmin();
     }
 
+    match /entries/{entryId} {
+      allow create: if false;
+      allow read: if isAdmin()
+        || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow update: if isAdmin()
+        && isValidEntry(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
+        && request.resource.data.status == 'rejected'
+        && resource.data.status == 'pending';
+      allow delete: if isAdmin() && resource.data.status != 'approved';
+    }
+
+    match /ticketReservations/{reservationId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.ownerUid == request.auth.uid);
+      allow create: if false;
+      allow update: if isValidReservation(request.resource.data)
+        && isAdmin()
+        && resource.data.status in ['reserved', 'pending', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['approved', 'rejected'];
+      allow delete: if isAdmin() && resource.data.status != 'approved';
+    }
+
+    match /ticketBoard/{reservationId} {
+      allow read: if isAdmin();
+      allow read: if isAuthenticated() && resource.data.status == 'approved';
+      allow read: if isAuthenticated() && resource.data.expiresAt > request.time;
+      allow create: if false;
+      allow update: if isValidBoard(request.resource.data)
+        && isAdmin()
+        && resource.data.status in ['reserved', 'pending', 'rejected']
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && request.resource.data.status in ['approved', 'rejected'];
+      allow delete: if isAdmin() && resource.data.status != 'approved';
+    }
+
     match /walletTransactions/{transactionId} {
-      allow read: if isAdmin() || (request.auth != null && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow write: if false;
     }
 
     match /settings/{settingId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
+      allow read: if isAuthenticated()
+        && settingId in ['prizes', 'payment', 'announcement'];
+      allow create, update: if isAdmin() && isValidSetting(settingId, request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

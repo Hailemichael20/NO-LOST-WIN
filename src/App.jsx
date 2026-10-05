@@ -1,4 +1,4 @@
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebaseConfig';
@@ -8,10 +8,23 @@ import LotteryRegistration from './components/LotteryRegistration';
 import LotteryWheel from './components/LotteryWheel';
 import AdminDashboard from './components/AdminDashboard';
 import AuthPage from './components/AuthPage';
+import Announcements from './components/Announcements';
+import { translations } from './translations';
 
 export default function App() {
   const [user, setUser] = useState(undefined);
   const [timeoutExceeded, setTimeoutExceeded] = useState(false);
+  const [language, setLanguage] = useState(() => localStorage.getItem('ethio-draw-language') || 'en');
+  const t = translations[language] || translations.en;
+
+  const changeLanguage = (nextLanguage) => {
+    setLanguage(nextLanguage);
+    localStorage.setItem('ethio-draw-language', nextLanguage);
+  };
+
+  useEffect(() => {
+    document.title = `ETHIO-DRAW | ${t.lottery}`;
+  }, [t.lottery]);
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
@@ -39,8 +52,8 @@ export default function App() {
       <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6">
         <div className="max-w-md rounded-3xl bg-white p-8 text-center shadow-xl">
           <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-700">ETHIO-DRAW</p>
-          <h1 className="mt-3 text-2xl font-black text-slate-950">Firebase setup required</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-500">Replace the placeholder values in <strong>.env.local</strong> with your Firebase web app configuration, then restart the Vite server.</p>
+          <h1 className="mt-3 text-2xl font-black text-slate-950">{t.firebaseSetup}</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-500">{t.firebaseSetupCopy}</p>
         </div>
       </div>
     );
@@ -51,11 +64,11 @@ export default function App() {
       <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6 text-center">
         <div className="rounded-3xl bg-white p-8 shadow-xl max-w-sm">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
-          <p className="font-bold text-slate-900">Loading Ethio-Draw...</p>
-          <p className="mt-2 text-sm text-slate-500">Connecting to your account</p>
+          <p className="font-bold text-slate-900">{t.loadingApp}</p>
+          <p className="mt-2 text-sm text-slate-500">{t.connecting}</p>
           {timeoutExceeded && (
             <p className="mt-4 text-xs text-orange-600 font-semibold">
-              ⚠️ Taking longer than expected. Please check your internet connection.
+              ⚠️ {t.slowConnection}
             </p>
           )}
         </div>
@@ -66,21 +79,22 @@ export default function App() {
   return (
     <Router>
       <div className="app-shell flex flex-col font-sans text-slate-900">
-        <Navbar user={user} />
+        <Navbar user={user} language={language} setLanguage={changeLanguage} />
 
         {/* Main Content Area */}
         <main className="container mx-auto w-full flex-grow px-4 py-8 sm:px-6 sm:py-12">
           <Routes>
-            <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage />} />
-            <Route path="/draw" element={user ? <LotteryRegistration user={user} /> : <Navigate to="/" replace />} />
-            <Route path="/wheel" element={user ? <LotteryWheel /> : <Navigate to="/" replace />} />
-            <Route path="/admin" element={user ? <AdminGuard /> : <Navigate to="/" replace />} />
+            <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
+            <Route path="/draw" element={user ? <LotteryRegistration user={user} language={language} /> : <Navigate to="/" replace />} />
+            <Route path="/wheel" element={user ? <LotteryWheel language={language} /> : <Navigate to="/" replace />} />
+            <Route path="/admin" element={user ? <AdminGuard language={language} /> : <Navigate to="/" replace />} />
           </Routes>
         </main>
 
         {/* Footer */}
-        <footer className="border-t border-slate-200/70 py-6 text-center text-xs font-medium text-slate-400">
-          © {new Date().getFullYear()} ETHIO-DRAW · Fila Draw
+        <footer className="border-t border-slate-200/70 px-4 py-6 text-center text-xs font-medium text-slate-400">
+          {user && <Announcements language={language} />}
+          <p className="mt-4">© {new Date().getFullYear()} {t.footerBrand}</p>
         </footer>
       </div>
     </Router>
@@ -88,8 +102,9 @@ export default function App() {
 }
 
 // Header Navigation Component
-function Navbar({ user }) {
+function Navbar({ user, language, setLanguage }) {
   const navigate = useNavigate();
+  const t = translations[language] || translations.en;
 
   const handleSignOut = async () => {
     await signOut(auth);
@@ -102,19 +117,27 @@ function Navbar({ user }) {
         {/* Brand Logo / Title */}
         <Link to="/" className="brand-mark flex items-center gap-3 text-sm font-bold text-amber-300 sm:text-base">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-orange-500 text-base text-slate-950 shadow-lg shadow-orange-500/20">✦</span>
-          <span><strong>ETHIO-DRAW</strong><small className="ml-2 font-medium text-slate-400">Fila Draw</small></span>
+          <span><strong>ETHIO-DRAW</strong><small className="ml-2 font-medium text-slate-400">{t.lottery}</small></span>
         </Link>
 
         {/* Nav Links */}
-        {user && <button onClick={handleSignOut} className="pill-button bg-white/10 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-white/20 sm:text-sm">Log out</button>}
+        <div className="flex items-center gap-3">
+          <label className="sr-only" htmlFor="app-language">{t.language}</label>
+          <select id="app-language" value={language} onChange={(event) => setLanguage(event.target.value)} className="rounded-lg border border-white/15 bg-slate-900 px-2 py-2 text-xs font-bold text-white">
+            <option value="en">{t.languageOptionEn}</option>
+            <option value="am">{t.languageOptionAm}</option>
+          </select>
+          {user && <button onClick={handleSignOut} className="pill-button bg-white/10 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-white/20 sm:text-sm">{t.logout}</button>}
+        </div>
       </div>
     </header>
   );
 }
 
 // Simple Admin Access Gatekeeper
-function AdminGuard() {
+function AdminGuard({ language }) {
   const [isAdmin, setIsAdmin] = useState(null);
+  const t = translations[language] || translations.en;
 
   useEffect(() => {
     let active = true;
@@ -129,18 +152,18 @@ function AdminGuard() {
   }, []);
 
   if (isAdmin === null) {
-    return <div className="mx-auto my-16 max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">Checking admin access...</div>;
+    return <div className="mx-auto my-16 max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">{t.checkingAdmin}</div>;
   }
 
   if (!isAdmin) {
     return (
       <div className="mx-auto my-16 max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-xl">
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-xl font-bold text-red-600">!</div>
-        <h2 className="mb-1 text-xl font-bold text-slate-800">Admin access required</h2>
-        <p className="text-xs text-slate-500">Your account is signed in, but it has not been granted the admin role.</p>
+        <h2 className="mb-1 text-xl font-bold text-slate-800">{t.adminRequired}</h2>
+        <p className="text-xs text-slate-500">{t.adminRequiredCopy}</p>
       </div>
     );
   }
 
-  return <AdminDashboard />;
+  return <AdminDashboard language={language} />;
 }

@@ -9,12 +9,30 @@ Firebase is used for Authentication and Firestore; receipt images are stored in 
 
 ## Production values
 
-Set these values in `.env.local` before deploying:
+These values can be set in `.env.local` as initial/fallback values:
 
 - `VITE_PAYMENT_TELEBIRR`: the real Telebirr receiving number
 - `VITE_PAYMENT_CBE`: the real CBE receiving account number
 
-The admin page is available at `/admin`, but it does not use a client-side password. Grant the Firebase Auth user a custom claim named `admin` with the boolean value `true` using a trusted server or Firebase Admin SDK. Then sign out and back in so the refreshed ID token contains the claim. Firestore rules and the Vercel approval endpoint enforce the admin claim.
+To change payment details for all devices without rebuilding the app, sign in as an admin, open `/admin`, and save the values in **Payment account details**. The shared settings are stored in Firestore and update on users' devices in real time. The environment values are used until payment settings are first saved in the admin page.
+
+## Language, numbered tickets, and notices
+
+The language selector is shared across the application and remembers the selected language on each device. App pages, status messages, the administrator dashboard, and the lottery wheel provide English and Amharic text.
+
+Ticket numbers `#001`–`#999` are reserved independently for each entry category. A selection is held for two hours from the time it is made. The registered list hides expired unconfirmed reservations and makes their numbers available again; confirmed numbers remain listed. Other signed-in users see names and only the last four phone digits. Full phone numbers stay in owner/admin-only reservation and receipt records.
+
+Admins can publish bilingual notices from `/admin`; signed-in users see them in the expandable **Announcements** panel at the bottom of the page.
+
+After deploying this change, deploy the Firestore rules and composite index as well as the web app:
+
+```bash
+npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes
+```
+
+Number selection, receipt submission, and receipt approval use the Vercel `/api/reserve-ticket`, `/api/submit-receipt`, and `/api/approve-receipt` endpoints. Redeploy the Vercel app so all three endpoints and the frontend are updated together. The server creates ticket reservations atomically, and approval checks that the two-hour reservation is still valid before confirming the ticket and crediting the wallet.
+
+The admin page is available at `/admin`, but it does not use a client-side password. Grant the Firebase Auth user a custom claim named `admin` with the boolean value `true` using a trusted server or Firebase Admin SDK. Then sign out and back in so the refreshed ID token contains the claim. Sign-in accepts either an email address or the phone number used at registration. Firestore rules and the Vercel approval endpoint enforce the admin claim.
 
 Example trusted Admin SDK operation:
 

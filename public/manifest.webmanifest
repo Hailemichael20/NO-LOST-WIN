@@ -1,7 +1,7 @@
 {
-  "name": "ETHIO-DRAW | Fila Draw",
+  "name": "ETHIO-DRAW | Lottery",
   "short_name": "ETHIO-DRAW",
-  "description": "Enter and manage ETHIO-DRAW fila lottery draws.",
+  "description": "Choose a ticket number and enter the ETHIO-DRAW lottery.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

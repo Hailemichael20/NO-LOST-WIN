@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig'; // Import your firebaseConfig
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { translations, translate } from '../translations';
 
 const TIERS = [50, 100, 200, 500];
 
@@ -10,7 +11,8 @@ const SLICE_COLORS = [
   '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'
 ];
 
-export default function LotteryWheel() {
+export default function LotteryWheel({ language }) {
+  const t = translations[language] || translations.en;
   const [selectedTier, setSelectedTier] = useState(100);
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -27,8 +29,8 @@ export default function LotteryWheel() {
     setWinner(null);
     try {
       const q = query(
-        collection(db, 'entries'),
-        where('tier', '==', selectedTier),
+        collection(db, 'ticketBoard'),
+        where('tier', '==', String(selectedTier)),
         where('status', '==', 'approved')
       );
       const snapshot = await getDocs(q);
@@ -86,7 +88,7 @@ export default function LotteryWheel() {
       ctx.textAlign = 'right';
       ctx.fillStyle = '#FFFFFF';
       ctx.font = 'bold 14px sans-serif';
-      ctx.fillText(user.fullName || `User ${i + 1}`, radius - 20, 5);
+      ctx.fillText(user.fullName || `${t.participant} ${i + 1}`, radius - 20, 5);
       ctx.restore();
     });
 
@@ -98,7 +100,7 @@ export default function LotteryWheel() {
     ctx.lineWidth = 3;
     ctx.strokeStyle = '#FFFFFF';
     ctx.stroke();
-  }, [participants]);
+  }, [participants, t.participant]);
 
   // 3. Trigger Spin Engine
   const spinWheel = () => {
@@ -131,24 +133,15 @@ export default function LotteryWheel() {
       const winningUser = participants[selectedIndex];
       setWinner(winningUser);
 
-      // Optionally mark winner in Firestore
-      try {
-        await updateDoc(doc(db, 'entries', winningUser.id), {
-          isWinner: true,
-          wonAt: new Date()
-        });
-      } catch (err) {
-        console.error('Failed to log winner to database:', err);
-      }
     }, 5000);
   };
 
   return (
     <div className="max-w-xl mx-auto my-8 p-6 bg-slate-900 rounded-3xl shadow-2xl text-white border border-slate-800">
       <h2 className="text-2xl font-black text-center mb-1 text-amber-400 uppercase tracking-wide">
-        🎰 Live Lottery Wheel
+        🎰 {t.lotteryWheel}
       </h2>
-      <p className="text-slate-400 text-center text-xs mb-6">Select Tier & Spin for Approved Participants</p>
+      <p className="text-slate-400 text-center text-xs mb-6">{t.chooseTierSpin}</p>
 
       {/* Tier Selector Tabs */}
       <div className="flex justify-center gap-2 mb-8">
@@ -163,7 +156,7 @@ export default function LotteryWheel() {
                 : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
             }`}
           >
-            {tier} Birr
+            {tier} {t.birr}
           </button>
         ))}
       </div>
@@ -171,11 +164,11 @@ export default function LotteryWheel() {
       {/* Wheel Area */}
       <div className="relative flex flex-col items-center justify-center min-h-[380px]">
         {loading ? (
-          <div className="text-slate-400 animate-pulse text-sm">Loading approved participants...</div>
+          <div className="text-slate-400 animate-pulse text-sm">{t.loadingParticipants}</div>
         ) : participants.length === 0 ? (
           <div className="p-8 text-center bg-slate-800/50 rounded-2xl border border-slate-800">
-            <p className="text-slate-300 font-semibold mb-1">No Approved Entries</p>
-            <p className="text-xs text-slate-500">Approve user receipts for the {selectedTier} Birr tier in the Admin Panel to begin.</p>
+            <p className="text-slate-300 font-semibold mb-1">{t.noApprovedEntries}</p>
+            <p className="text-xs text-slate-500">{translate(t.approveToBegin, { tier: `${selectedTier} ${t.birr}` })}</p>
           </div>
         ) : (
           <div className="relative">
@@ -198,13 +191,13 @@ export default function LotteryWheel() {
 
       {/* Participant Counter & Refresh */}
       <div className="flex justify-between items-center mt-6 px-2 text-xs text-slate-400">
-        <span>Approved Candidates: <strong className="text-amber-400">{participants.length}</strong></span>
+        <span>{t.confirmedCandidates}: <strong className="text-amber-400">{participants.length}</strong></span>
         <button 
           onClick={fetchParticipants} 
           disabled={isSpinning}
           className="underline hover:text-white transition"
         >
-          Refresh List
+          {t.refreshList}
         </button>
       </div>
 
@@ -218,17 +211,17 @@ export default function LotteryWheel() {
             : 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 hover:from-amber-300 hover:to-amber-400 active:scale-[0.98]'
         }`}
       >
-        {isSpinning ? 'Spinning Wheel...' : `SPIN FOR ${selectedTier} BIRR WINNER`}
+        {isSpinning ? t.spinningWheel : translate(t.spinForWinner, { tier: `${selectedTier} ${t.birr}` })}
       </button>
 
       {/* Winner Announcement Popup Modal */}
       {winner && (
         <div className="mt-6 p-5 bg-gradient-to-br from-amber-500/20 to-emerald-500/20 border-2 border-amber-400 rounded-2xl text-center animate-bounce">
           <span className="text-3xl mb-1 block">🎉</span>
-          <h3 className="text-xl font-extrabold text-amber-300 uppercase">WINNER SELECTED!</h3>
+          <h3 className="text-xl font-extrabold text-amber-300 uppercase">{t.winnerSelected}</h3>
           <p className="text-2xl font-black text-white mt-1">{winner.fullName}</p>
-          <p className="text-sm font-mono text-emerald-400 mt-0.5">{winner.phone}</p>
-          <p className="text-xs text-slate-400 mt-2">Category: {winner.tier} Birr Tier</p>
+          <p className="text-sm font-mono text-emerald-400 mt-0.5">#{String(winner.number).padStart(3, '0')}</p>
+          <p className="text-xs text-slate-400 mt-2">{t.category}: {winner.tier} {t.birr}</p>
         </div>
       )}
     </div>
