@@ -59,39 +59,35 @@ export default function App() {
     );
   }
 
-  if (user === undefined) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6 text-center">
-        <div className="rounded-3xl bg-white p-8 shadow-xl max-w-sm">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
-          <p className="font-bold text-slate-900">{t.loadingApp}</p>
-          <p className="mt-2 text-sm text-slate-500">{t.connecting}</p>
-          {timeoutExceeded && (
-            <p className="mt-4 text-xs text-orange-600 font-semibold">
-              ⚠️ {t.slowConnection}
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <Router>
       <div className="app-shell flex flex-col font-sans text-slate-900">
         <Navbar user={user} language={language} setLanguage={changeLanguage} />
 
-        {/* Main Content Area */}
         <main className="container mx-auto w-full flex-grow px-4 py-8 sm:px-6 sm:py-12">
-          <Routes>
-            <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
-            <Route path="/draw" element={user ? <LotteryRegistration user={user} language={language} /> : <Navigate to="/" replace />} />
-            <Route path="/wheel" element={user ? <LotteryWheel language={language} /> : <Navigate to="/" replace />} />
-            <Route path="/admin" element={user ? <AdminGuard language={language} /> : <Navigate to="/" replace />} />
-          </Routes>
+          {user === undefined ? (
+            <div className="flex min-h-[60vh] items-center justify-center px-6 text-center">
+              <div className="max-w-sm rounded-3xl bg-white p-8 shadow-xl">
+                <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
+                <p className="font-bold text-slate-900">{t.loadingApp}</p>
+                <p className="mt-2 text-sm text-slate-500">{t.connecting}</p>
+                {timeoutExceeded && (
+                  <p className="mt-4 text-xs text-orange-600 font-semibold">
+                    ⚠️ {t.slowConnection}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <Routes>
+              <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
+              <Route path="/draw" element={user ? <LotteryRegistration user={user} language={language} /> : <Navigate to="/" replace />} />
+              <Route path="/wheel" element={user ? <LotteryWheel language={language} /> : <Navigate to="/" replace />} />
+              <Route path="/admin" element={user ? <AdminGuard language={language} /> : <Navigate to="/" replace />} />
+            </Routes>
+          )}
         </main>
 
-        {/* Footer */}
         <footer className="border-t border-slate-200/70 px-4 py-6 text-center text-xs font-medium text-slate-400">
           {user && <Announcements language={language} />}
           <p className="mt-4">© {new Date().getFullYear()} {t.footerBrand}</p>
@@ -113,21 +109,24 @@ function Navbar({ user, language, setLanguage }) {
 
   return (
     <header className="app-nav sticky top-0 z-40 text-white shadow-lg shadow-slate-950/10">
-      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+      <div className="container mx-auto flex h-16 items-center justify-between gap-2 px-3 sm:px-4">
         {/* Brand Logo / Title */}
-        <Link to="/" className="brand-mark flex items-center gap-3 text-sm font-bold text-amber-300 sm:text-base">
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-orange-500 text-base text-slate-950 shadow-lg shadow-orange-500/20">✦</span>
-          <span><strong>ETHIO-DRAW</strong><small className="ml-2 font-medium text-slate-400">{t.lottery}</small></span>
+        <Link to="/" className="brand-mark flex min-w-0 items-center gap-2 text-sm font-bold text-amber-300 sm:gap-3 sm:text-base">
+          <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-orange-500 text-sm text-slate-950 shadow-lg shadow-orange-500/20 sm:h-9 sm:w-9 sm:text-base">✦</span>
+          <span className="min-w-0 truncate">
+            <strong>ETHIO-DRAW</strong>
+            <small className="ml-1.5 hidden font-medium text-slate-400 sm:inline">{t.lottery}</small>
+          </span>
         </Link>
 
         {/* Nav Links */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <label className="sr-only" htmlFor="app-language">{t.language}</label>
-          <select id="app-language" value={language} onChange={(event) => setLanguage(event.target.value)} className="rounded-lg border border-white/15 bg-slate-900 px-2 py-2 text-xs font-bold text-white">
+          <select id="app-language" value={language} onChange={(event) => setLanguage(event.target.value)} className="max-w-[110px] rounded-lg border border-white/15 bg-slate-900 px-2 py-2 text-[11px] font-bold text-white outline-none ring-0 transition focus:border-cyan-400 sm:text-xs">
             <option value="en">{t.languageOptionEn}</option>
             <option value="am">{t.languageOptionAm}</option>
           </select>
-          {user && <button onClick={handleSignOut} className="pill-button bg-white/10 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-white/20 sm:text-sm">{t.logout}</button>}
+          {user && <button onClick={handleSignOut} className="pill-button bg-white/10 px-3 py-2 text-[11px] font-bold text-slate-200 hover:bg-white/20 sm:px-4 sm:text-sm">{t.logout}</button>}
         </div>
       </div>
     </header>
