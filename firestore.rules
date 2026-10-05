@@ -184,7 +184,7 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow update: if isAdmin()
-        && isValidEntry(request.resource.data)
+        && validEntry(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
         && request.resource.data.status == 'rejected'
         && resource.data.status == 'pending';
