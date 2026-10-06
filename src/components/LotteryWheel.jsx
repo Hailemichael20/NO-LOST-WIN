@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../firebaseConfig'; // Import your firebaseConfig
+import { useState, useEffect, useRef } from 'react';
+import { db } from '../firebaseConfig';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { translations, translate } from '../translations';
+import { isEligibleDrawTicket, MAX_TICKET_NUMBER } from '../../lib/ticket-constants';
+import { getWheelAlignmentDegrees } from '../../lib/lottery-wheel';
 
 const TIERS = [50, 100, 200, 500];
 
@@ -16,36 +18,48 @@ export default function LotteryWheel({ language }) {
   const [selectedTier, setSelectedTier] = useState(100);
   const [participants, setParticipants] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [isSpinning, setIsSpinning] = useState(false);
   
   const [rotationDegree, setRotationDegree] = useState(0);
   const [winner, setWinner] = useState(null);
 
   const canvasRef = useRef(null);
+  const fetchId = useRef(0);
 
   // 1. Fetch Approved Participants from Firestore for Selected Tier
   const fetchParticipants = async () => {
+    const requestId = ++fetchId.current;
     setLoading(true);
+    setLoadError('');
+    setParticipants([]);
     setWinner(null);
     try {
       const q = query(
         collection(db, 'ticketBoard'),
         where('tier', '==', String(selectedTier)),
-        where('status', '==', 'approved')
+        where('status', '==', 'approved'),
+        where('number', '<=', String(MAX_TICKET_NUMBER))
       );
       const snapshot = await getDocs(q);
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setParticipants(data);
+      const data = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter((ticket) => isEligibleDrawTicket(ticket, selectedTier));
+      if (fetchId.current === requestId) setParticipants(data);
     } catch (err) {
       console.error('Error fetching participants:', err);
+      if (fetchId.current === requestId) setLoadError(t.entriesLoadError);
     } finally {
-      setLoading(false);
+      if (fetchId.current === requestId) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchParticipants();
-  }, [selectedTier]);
+    return () => {
+      fetchId.current += 1;
+    };
+  }, [selectedTier, t.entriesLoadError]);
 
   // 2. Draw Wheel Slices on Canvas
   useEffect(() => {
@@ -81,15 +95,16 @@ export default function LotteryWheel({ language }) {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Draw Name Text
-      ctx.save();
-      ctx.translate(centerX, centerY);
-      ctx.rotate(startAngle + arcSize / 2);
-      ctx.textAlign = 'right';
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.fillText(user.fullName || `${t.participant} ${i + 1}`, radius - 20, 5);
-      ctx.restore();
+      if (arcSize >= 0.12) {
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate(startAngle + arcSize / 2);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText(`#${String(user.number).padStart(3, '0')}`, radius - 14, 4);
+        ctx.restore();
+      }
     });
 
     // Draw Center Peg
@@ -100,7 +115,7 @@ export default function LotteryWheel({ language }) {
     ctx.lineWidth = 3;
     ctx.strokeStyle = '#FFFFFF';
     ctx.stroke();
-  }, [participants, t.participant]);
+  }, [participants]);
 
   // 3. Trigger Spin Engine
   const spinWheel = () => {
@@ -115,15 +130,10 @@ export default function LotteryWheel({ language }) {
     const selectedIndex = randomBuffer[0] % participants.length;
 
     const numSlices = participants.length;
-    const arcDegree = 360 / numSlices;
-
-    // Calculate angle to land winning slice at the top pointer (270deg / 12 o'clock position)
-    const winningSliceMiddle = (selectedIndex * arcDegree) + (arcDegree / 2);
-    
     // Total spins = 5 full rotations (1800 deg) + offset to align slice with top indicator
     const extraTurns = 1800;
-    const currentRotationMod = rotationDegree % 360;
-    const targetDegree = rotationDegree + extraTurns + (360 - winningSliceMiddle) - (currentRotationMod);
+    const alignment = getWheelAlignmentDegrees(selectedIndex, numSlices, rotationDegree);
+    const targetDegree = rotationDegree + extraTurns + alignment;
 
     setRotationDegree(targetDegree);
 
@@ -148,7 +158,7 @@ export default function LotteryWheel({ language }) {
         {TIERS.map(tier => (
           <button
             key={tier}
-            disabled={isSpinning}
+            disabled={isSpinning || loading}
             onClick={() => setSelectedTier(tier)}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition ${
               selectedTier === tier
@@ -165,6 +175,10 @@ export default function LotteryWheel({ language }) {
       <div className="relative flex flex-col items-center justify-center min-h-[380px]">
         {loading ? (
           <div className="text-slate-400 animate-pulse text-sm">{t.loadingParticipants}</div>
+        ) : loadError ? (
+          <div className="p-8 text-center bg-red-950/40 rounded-2xl border border-red-900">
+            <p className="text-sm text-red-200">{loadError}</p>
+          </div>
         ) : participants.length === 0 ? (
           <div className="p-8 text-center bg-slate-800/50 rounded-2xl border border-slate-800">
             <p className="text-slate-300 font-semibold mb-1">{t.noApprovedEntries}</p>
@@ -194,7 +208,7 @@ export default function LotteryWheel({ language }) {
         <span>{t.confirmedCandidates}: <strong className="text-amber-400">{participants.length}</strong></span>
         <button 
           onClick={fetchParticipants} 
-          disabled={isSpinning}
+          disabled={isSpinning || loading}
           className="underline hover:text-white transition"
         >
           {t.refreshList}
@@ -204,9 +218,9 @@ export default function LotteryWheel({ language }) {
       {/* Spin Control Button */}
       <button
         onClick={spinWheel}
-        disabled={isSpinning || participants.length === 0}
+        disabled={loading || isSpinning || participants.length === 0}
         className={`w-full mt-6 py-4 rounded-2xl font-black text-lg transition uppercase tracking-wider shadow-xl ${
-          isSpinning || participants.length === 0
+          loading || isSpinning || participants.length === 0
             ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
             : 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 hover:from-amber-300 hover:to-amber-400 active:scale-[0.98]'
         }`}

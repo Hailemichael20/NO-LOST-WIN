@@ -2,6 +2,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
+import { isValidTicketNumber } from '../lib/ticket-constants.js';
 
 const RESERVATION_MS = 2 * 60 * 60 * 1000;
 const VALID_TIERS = [50, 100, 200, 500];
@@ -25,9 +26,7 @@ export default async function handler(request, response) {
     const phone = typeof request.body?.phone === 'string' ? request.body.phone.trim() : '';
 
     if (!VALID_TIERS.includes(tier)
-      || !Number.isInteger(number)
-      || number < 1
-      || number > 999
+      || !isValidTicketNumber(number)
       || fullName.length < 1
       || fullName.length > 100
       || phone.length < 7

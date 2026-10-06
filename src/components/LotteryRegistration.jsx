@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { auth, db, paymentConfig } from '../firebaseConfig';
 import { Timestamp, collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { apiBaseUrl, uploadReceiptImage } from '../cloudinaryUpload';
 import { translations, translate } from '../translations';
+import { MAX_TICKET_NUMBER } from '../../lib/ticket-constants';
 
 const TIERS = [
   { amount: 50, icon: '◈', label: 'starter', art: '#34d6f4' },
@@ -33,7 +34,6 @@ export default function LotteryRegistration({ user, language }) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [currentReservation, setCurrentReservation] = useState(null);
   const [successNumber, setSuccessNumber] = useState(null);
-  const [now, setNow] = useState(Date.now());
   const [ticketQueryAfter, setTicketQueryAfter] = useState(Date.now() + 5000);
   const [reservationsLoading, setReservationsLoading] = useState(true);
   const [receiptFile, setReceiptFile] = useState(null);
@@ -59,11 +59,6 @@ export default function LotteryRegistration({ user, language }) {
     };
     loadProfile();
   }, [user.uid, user.displayName]);
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => setTicketQueryAfter(Date.now() + 5000), 30000);
@@ -173,12 +168,22 @@ export default function LotteryRegistration({ user, language }) {
   }, [selectedTier, t.entriesLoadError, ticketQueryAfter, user.uid]);
 
   useEffect(() => {
-    if (currentReservation && currentReservation.expiresAt.toMillis() <= now) {
+    if (!currentReservation) return undefined;
+
+    const expireReservation = () => {
       setCurrentReservation(null);
       setStep('numbers');
       setError(t.expiredMessage);
+    };
+    const remaining = currentReservation.expiresAt.toMillis() - Date.now();
+    if (remaining <= 0) {
+      expireReservation();
+      return undefined;
     }
-  }, [currentReservation, now, t.expiredMessage]);
+
+    const timeout = setTimeout(expireReservation, remaining);
+    return () => clearTimeout(timeout);
+  }, [currentReservation, t.expiredMessage]);
 
   const chooseTier = (tier) => {
     setSelectedTier(tier);
@@ -343,14 +348,13 @@ export default function LotteryRegistration({ user, language }) {
       {error && <p className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
       {step === 'categories' && <CategoryGrid onChoose={chooseTier} prizeAmounts={prizeAmounts} t={t} />}
       {step === 'numbers' && <>
-        <RegisteredList amount={selectedTier} reservations={reservations} loading={reservationsLoading} now={now} userId={user.uid} t={t} />
+        <RegisteredList amount={selectedTier} reservations={reservations} loading={reservationsLoading} userId={user.uid} t={t} />
         <TicketPicker
           fullName={fullName}
           setFullName={setFullName}
           phoneNumber={phoneNumber}
           setPhoneNumber={setPhoneNumber}
           reservations={reservations}
-          now={now}
           loading={loading}
           onChoose={reserveNumber}
           t={t}
@@ -398,7 +402,8 @@ function PrizeValue({ label, value, color, currency }) {
   return <div><span className={`block text-[10px] font-black uppercase ${color}`}>{label}</span><span className="mt-1 block text-xs font-bold text-slate-700">{value || 0} {currency}</span></div>;
 }
 
-function RegisteredList({ amount, reservations, loading, now, userId, t }) {
+function RegisteredList({ amount, reservations, loading, userId, t }) {
+  const now = useCurrentTime(15000);
   const active = reservations
     .filter((item) => item.status === 'approved' || item.expiresAt?.toMillis() > now)
     .sort((left, right) => Number(left.number) - Number(right.number));
@@ -440,7 +445,8 @@ function RegisteredList({ amount, reservations, loading, now, userId, t }) {
   );
 }
 
-function TicketPicker({ fullName, setFullName, phoneNumber, setPhoneNumber, reservations, now, loading, onChoose, t }) {
+function TicketPicker({ fullName, setFullName, phoneNumber, setPhoneNumber, reservations, loading, onChoose, t }) {
+  const now = useCurrentTime(30000);
   const heldNumbers = new Set(reservations
     .filter((item) => item.status === 'approved' || item.expiresAt?.toMillis() > now)
     .map((item) => Number(item.number)));
@@ -453,9 +459,9 @@ function TicketPicker({ fullName, setFullName, phoneNumber, setPhoneNumber, rese
         <label className="text-sm font-bold text-slate-700">{t.fullName}<input required value={fullName} onChange={(event) => setFullName(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal" /></label>
         <label className="text-sm font-bold text-slate-700">{t.mobile}<input required type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder={t.placeholderPhone} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal" /></label>
       </div>
-      <p className="mt-5 text-xs font-bold uppercase tracking-wide text-slate-400">{t.available} · #001–#999</p>
+      <p className="mt-5 text-xs font-bold uppercase tracking-wide text-slate-400">{t.available} · #001–#{MAX_TICKET_NUMBER}</p>
       <div className="mt-3 grid max-h-80 grid-cols-5 gap-2 overflow-y-auto p-1 sm:grid-cols-8 md:grid-cols-10">
-        {Array.from({ length: 999 }, (_, index) => index + 1).map((number) => {
+        {Array.from({ length: MAX_TICKET_NUMBER }, (_, index) => index + 1).map((number) => {
           const unavailable = heldNumbers.has(number);
           return <button key={number} type="button" disabled={unavailable || loading || !fullName.trim() || !phoneNumber.trim()} onClick={() => onChoose(number)} aria-label={`${t.ticket} #${String(number).padStart(3, '0')}`} className={`rounded-lg border px-1 py-2 text-xs font-mono font-bold transition ${unavailable ? 'cursor-not-allowed border-slate-100 bg-slate-100 text-slate-300' : 'border-cyan-100 bg-cyan-50 text-cyan-800 hover:border-cyan-400 hover:bg-cyan-100 disabled:opacity-40'}`}>
             #{String(number).padStart(3, '0')}
@@ -467,8 +473,9 @@ function TicketPicker({ fullName, setFullName, phoneNumber, setPhoneNumber, rese
 }
 
 function PaymentPanel({ amount, reservation, paymentDetails, onDone, t }) {
+  const now = useCurrentTime(1000);
   const paymentReady = paymentDetails.telebirr || paymentDetails.cbe;
-  const remaining = Math.max(0, reservation.expiresAt.toMillis() - Date.now());
+  const remaining = Math.max(0, reservation.expiresAt.toMillis() - now);
   const countdown = `${String(Math.floor(remaining / 60000)).padStart(2, '0')}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0')}`;
   return <div className="rounded-[1.75rem] bg-white p-6 shadow-xl shadow-slate-900/5">
     <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-600">{t.step} 2 · #{String(reservation.number).padStart(3, '0')}</p>
@@ -478,6 +485,17 @@ function PaymentPanel({ amount, reservation, paymentDetails, onDone, t }) {
     {paymentReady ? <div className="my-6 space-y-3 rounded-2xl bg-orange-50 p-4 text-sm text-orange-950">{paymentDetails.telebirr && <p><strong>Telebirr</strong><br /><span className="font-mono font-bold">{paymentDetails.telebirr}</span></p>}{paymentDetails.cbe && <p><strong>CBE</strong><br /><span className="font-mono font-bold">{paymentDetails.cbe}</span></p>}</div> : <p className="my-6 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">{t.paymentNotConfigured}</p>}
     <button disabled={!paymentReady} onClick={onDone} className="w-full rounded-2xl bg-orange-500 py-3.5 text-sm font-bold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">{t.completedPayment}</button>
   </div>;
+}
+
+function useCurrentTime(intervalMs) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(interval);
+  }, [intervalMs]);
+
+  return now;
 }
 
 function ReceiptForm({ handleFileChange, filePreview, handleSubmit, loading, uploadProgress, number, t }) {

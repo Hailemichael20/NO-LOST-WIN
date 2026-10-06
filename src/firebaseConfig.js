@@ -1,7 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || import.meta.env.REACT_APP_FIREBASE_API_KEY,
@@ -25,7 +24,6 @@ export const isFirebaseConfigured = requiredConfig.every((key) => {
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 export const db = app ? getFirestore(app) : null;
 export const auth = app ? getAuth(app) : null;
-export const functions = app ? getFunctions(app, 'africa-south1') : null;
 
 export const paymentConfig = {
   telebirr: import.meta.env.VITE_PAYMENT_TELEBIRR || '',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { auth, db, paymentConfig } from '../firebaseConfig';
 import { apiBaseUrl } from '../cloudinaryUpload';
 import { translations } from '../translations';
@@ -22,6 +22,7 @@ const DEFAULT_PRIZES = Object.fromEntries(PRIZE_TIERS.map((tier) => [tier, { fir
 export default function AdminDashboard({ language }) {
   const t = translations[language] || translations.en;
   const [entries, setEntries] = useState([]);
+  const [entriesError, setEntriesError] = useState('');
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending');
   const [tierFilter, setTierFilter] = useState('all');
@@ -168,33 +169,28 @@ export default function AdminDashboard({ language }) {
   // 1. Fetch Entries in Real-Time
   useEffect(() => {
     setLoading(true);
-    let q = query(
-      collection(db, 'entries'),
-      where('status', '==', statusFilter),
-      orderBy('createdAt', 'desc')
-    );
+    setEntriesError('');
+    const constraints = [where('status', '==', statusFilter)];
+    if (tierFilter !== 'all') constraints.push(where('tier', '==', Number(tierFilter)));
+    constraints.push(orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'entries'), ...constraints);
 
-    // Listen for live Firestore updates
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      let docs = snapshot.docs.map(doc => ({
+      const docs = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
 
-      // Filter locally by Tier if selected
-      if (tierFilter !== 'all') {
-        docs = docs.filter(item => item.tier === Number(tierFilter));
-      }
-
       setEntries(docs);
       setLoading(false);
     }, (error) => {
-      console.error("Firestore listener error:", error);
+      console.error('Firestore listener error:', error);
+      setEntriesError(t.entriesLoadError);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [statusFilter, tierFilter]);
+  }, [statusFilter, tierFilter, t.entriesLoadError]);
 
   // 2. Approve or Reject Entry Status
   const handleUpdateStatus = async (id, newStatus) => {
@@ -279,7 +275,7 @@ export default function AdminDashboard({ language }) {
   };
 
   return (
-    <div className="max-w-6xl mx-auto my-8 p-6 bg-slate-50 min-h-screen rounded-3xl border border-gray-200">
+    <div className="mx-auto my-4 max-w-6xl rounded-3xl border border-gray-200 bg-slate-50 p-3 sm:my-8 sm:p-6">
       {/* Header & Quick Stats */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
@@ -298,14 +294,14 @@ export default function AdminDashboard({ language }) {
       {actionMessage && <p className="mb-5 rounded-2xl bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800">{actionMessage}</p>}
 
       {/* Control Toolbar (Status & Tier Filters) */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 mb-6 flex flex-wrap justify-between gap-4">
+      <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:justify-between sm:p-4">
         {/* Status Tabs */}
-        <div className="flex bg-gray-100 p-1 rounded-xl">
+        <div className="flex w-full flex-wrap rounded-xl bg-gray-100 p-1 sm:w-auto">
           {STATUSES.map((status) => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold capitalize transition ${
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold capitalize transition sm:flex-none sm:px-4 ${
                 statusFilter === status
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-500 hover:text-gray-900'
@@ -317,14 +313,14 @@ export default function AdminDashboard({ language }) {
         </div>
 
         {/* Tier Filter dropdown */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <label className="text-xs font-bold uppercase text-gray-500">{t.tier}:</label>
-          <div className="flex gap-1.5">
+          <div className="flex max-w-full flex-wrap gap-1.5">
             {TIERS.map((tier) => (
               <button
                 key={tier}
                 onClick={() => setTierFilter(tier)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                className={`whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-semibold transition sm:px-3 ${
                   tierFilter === tier
                     ? 'bg-gray-900 text-white'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -427,6 +423,8 @@ export default function AdminDashboard({ language }) {
         {announcementMessage && <p className="mt-3 text-xs font-semibold text-cyan-700">{announcementMessage}</p>}
       </form>
 
+      {entriesError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{entriesError}</p>}
+
       {/* Data Table / List */}
       {loading ? (
         <div className="text-center py-20 text-gray-400 animate-pulse font-medium">{t.loadingSubmissions}</div>
@@ -435,7 +433,70 @@ export default function AdminDashboard({ language }) {
           {t.noEntries.replace('{{status}}', t[statusFilter] || statusFilter)}
         </div>
       ) : (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+        <>
+        <div className="space-y-3 md:hidden">
+          {visibleEntries.map((entry) => (
+            <article key={entry.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="break-words font-bold text-gray-900">{entry.fullName}</h2>
+                  <p className="mt-1 break-all font-mono text-xs text-gray-500">{entry.phone}</p>
+                </div>
+                <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-700">
+                  {t[entry.status] || entry.status}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-600">
+                <span className="font-mono font-bold text-gray-900">{entry.number ? `#${String(entry.number).padStart(3, '0')}` : '—'}</span>
+                <span>{entry.tier} {t.birr}</span>
+                <span className="text-xs">{entry.createdAt?.toDate ? entry.createdAt.toDate().toLocaleString(language === 'am' ? 'am-ET' : 'en-US') : t.justNow}</span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                {entry.receiptUrl ? (
+                  <button
+                    onClick={() => setActiveReceiptUrl(entry.receiptUrl)}
+                    className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold text-blue-700"
+                  >
+                    {t.view} {t.receiptScreenshot}
+                  </button>
+                ) : <span className="text-xs text-gray-400">{t.noReceipt}</span>}
+                {entry.status !== 'approved' && (
+                  <button onClick={() => handleDelete(entry.id)} className="rounded-lg px-3 py-2 text-xs font-bold text-red-600">
+                    {t.deleteRecord}
+                  </button>
+                )}
+              </div>
+              {statusFilter === 'pending' && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    disabled={updatingId === entry.id}
+                    onClick={() => handleUpdateStatus(entry.id, 'approved')}
+                    className="min-h-11 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"
+                  >
+                    {t.approve}
+                  </button>
+                  <button
+                    disabled={updatingId === entry.id}
+                    onClick={() => handleUpdateStatus(entry.id, 'rejected')}
+                    className="min-h-11 rounded-lg bg-red-50 px-3 py-2 text-sm font-bold text-red-600 disabled:opacity-50"
+                  >
+                    {t.reject}
+                  </button>
+                </div>
+              )}
+              {statusFilter === 'rejected' && (
+                <button
+                  disabled={updatingId === entry.id}
+                  onClick={() => handleUpdateStatus(entry.id, 'approved')}
+                  className="mt-3 min-h-11 w-full rounded-lg bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 disabled:opacity-50"
+                >
+                  {t.reapprove}
+                </button>
+              )}
+            </article>
+          ))}
+        </div>
+        <div className="hidden overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -542,6 +603,7 @@ export default function AdminDashboard({ language }) {
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* Full Resolution Receipt Image Modal */}

@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebaseConfig';
 
 // Import your page components
-import LotteryRegistration from './components/LotteryRegistration';
-import LotteryWheel from './components/LotteryWheel';
-import AdminDashboard from './components/AdminDashboard';
-import AuthPage from './components/AuthPage';
+const LotteryRegistration = lazy(() => import('./components/LotteryRegistration'));
+const LotteryWheel = lazy(() => import('./components/LotteryWheel'));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
+const AuthPage = lazy(() => import('./components/AuthPage'));
 import Announcements from './components/Announcements';
 import { translations } from './translations';
 
@@ -79,12 +79,14 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <Routes>
-              <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
-              <Route path="/draw" element={user ? <LotteryRegistration user={user} language={language} /> : <Navigate to="/" replace />} />
-              <Route path="/wheel" element={user ? <LotteryWheel language={language} /> : <Navigate to="/" replace />} />
-              <Route path="/admin" element={user ? <AdminGuard language={language} /> : <Navigate to="/" replace />} />
-            </Routes>
+            <Suspense fallback={<div className="py-16 text-center text-sm font-semibold text-slate-500">{t.loadingApp}</div>}>
+              <Routes>
+                <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
+                <Route path="/draw" element={user ? <LotteryRegistration user={user} language={language} /> : <Navigate to="/" replace />} />
+                <Route path="/wheel" element={user ? <LotteryWheel language={language} /> : <Navigate to="/" replace />} />
+                <Route path="/admin" element={user ? <AdminGuard language={language} /> : <Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
           )}
         </main>
 
@@ -101,6 +103,25 @@ export default function App() {
 function Navbar({ user, language, setLanguage }) {
   const navigate = useNavigate();
   const t = translations[language] || translations.en;
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!user) {
+      setIsAdmin(false);
+      return () => { active = false; };
+    }
+
+    getIdTokenResult(user)
+      .then(({ claims }) => {
+        if (active) setIsAdmin(claims.admin === true);
+      })
+      .catch((error) => {
+        console.error('Admin navigation claim error:', error);
+        if (active) setIsAdmin(false);
+      });
+    return () => { active = false; };
+  }, [user]);
 
   const handleSignOut = async () => {
     await signOut(auth);
@@ -121,6 +142,17 @@ function Navbar({ user, language, setLanguage }) {
 
         {/* Nav Links */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {user && isAdmin && (
+            <Link
+              to="/admin"
+              aria-label={t.adminLink}
+              title={t.adminLink}
+              className="rounded-lg px-2 py-2 text-xs font-bold text-slate-200 hover:bg-white/10 sm:px-3"
+            >
+              <span className="sm:hidden" aria-hidden="true">⚙</span>
+              <span className="hidden sm:inline">{t.adminLink}</span>
+            </Link>
+          )}
           <label className="sr-only" htmlFor="app-language">{t.language}</label>
           <select id="app-language" value={language} onChange={(event) => setLanguage(event.target.value)} className="max-w-[110px] rounded-lg border border-white/15 bg-slate-900 px-2 py-2 text-[11px] font-bold text-white outline-none ring-0 transition focus:border-cyan-400 sm:text-xs">
             <option value="en">{t.languageOptionEn}</option>
