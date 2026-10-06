@@ -34,9 +34,20 @@ Number selection, receipt submission, and receipt approval use the Vercel `/api/
 
 The admin page is available at `/#/admin` (and from the navigation bar on mobile), but it does not use a client-side password. Grant the Firebase Auth user a custom claim named `admin` with the boolean value `true` using a trusted server or Firebase Admin SDK. Then sign out and back in so the refreshed ID token contains the claim. Sign-in accepts either an email address or the phone number used at registration. Firestore rules and the Vercel approval endpoint enforce the admin claim.
 
-Signed-in users can change their password from the navigation bar at any time. After resetting a user's password through a trusted Firebase Admin SDK process, set `users/{uid}.mustChangePassword` to `true`; the app redirects that user to the change-password page after sign-in. The user must authenticate with their temporary/current password, set a new password of at least six characters, and confirm it. The app clears the flag after the password update succeeds. Deploy the updated Firestore rules so only the owner can clear an existing `true` flag to `false`.
+Signed-in users can change their password from the navigation bar at any time. After resetting a user's password through a trusted Firebase Admin SDK process, set `users/{uid}.mustChangePassword` to `true` and set `users/{uid}.passwordChangeRequiredAt` to a server timestamp. The app redirects that user to the change-password page after sign-in. The user must authenticate with their temporary/current password, set a new password of at least six characters, and confirm it. The authenticated Vercel endpoint clears the flag only when Firebase Auth confirms the password was updated after that timestamp. Firestore rules do not allow clients (including signed-in admins) to set or clear either password-reset field; Admin SDK writes bypass these rules.
 
-Example trusted Admin SDK operation:
+After changing the user's password through the Admin SDK, mark the requirement with a server timestamp:
+
+```js
+await getFirestore(app).doc(`users/${uid}`).set({
+  mustChangePassword: true,
+  passwordChangeRequiredAt: FieldValue.serverTimestamp(),
+}, { merge: true });
+```
+
+Existing flagged accounts without `passwordChangeRequiredAt` must be updated through a trusted Admin SDK process; the clearing endpoint intentionally refuses to clear them without that timestamp.
+
+Example admin claim setup:
 
 ```js
 await getAuth().setCustomUserClaims('FIREBASE_USER_UID', { admin: true });

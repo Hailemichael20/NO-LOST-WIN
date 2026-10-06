@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
-import { auth, db } from '../firebaseConfig';
+import { apiBaseUrl } from '../cloudinaryUpload';
 import { passwordChangeErrorKey, validateNewPassword } from '../../lib/password-change';
 import { translations } from '../translations';
 
@@ -20,7 +19,14 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
   const clearPasswordChangeFlag = async () => {
     setBusy(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), { mustChangePassword: false });
+      const idToken = await user.getIdToken();
+      const response = await fetch(`${apiBaseUrl}/api/clear-password-change-flag`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Could not clear the password-change requirement.');
+
       onPasswordChanged();
       setPasswordUpdated(false);
       setNotice(t.passwordChanged);
@@ -58,7 +64,11 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
         setCurrentPassword('');
         setNewPassword('');
         setConfirmation('');
-        await clearPasswordChangeFlag();
+        try {
+          await clearPasswordChangeFlag();
+        } catch (flagError) {
+          console.error('Could not clear required password change flag:', flagError);
+        }
         return;
       }
 

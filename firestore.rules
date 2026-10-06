@@ -2,7 +2,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Data model:
-    // users/{uid}: private profile (name, phone); wallet fields are server-managed.
+    // users/{uid}: private profile (name, phone); wallet and password-reset fields
+    //   are server-managed.
     // entries/{id}: private payment receipt and wallet-review state.
     // ticketReservations/{tier-number}: private ticket holder details and six-hour expiry.
     // ticketBoard/{tier-number}: public-to-authenticated-users ticket, name, status,
@@ -24,7 +25,7 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasOnly([
           'fullName', 'phone', 'createdAt', 'winBirrBalance', 'walletUpdatedAt',
-          'mustChangePassword'
+          'mustChangePassword', 'passwordChangeRequiredAt'
         ])
         && data.fullName is string
         && data.fullName.size() > 0
@@ -35,7 +36,8 @@ service cloud.firestore {
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && (!('winBirrBalance' in data) || data.winBirrBalance is number)
         && (!('walletUpdatedAt' in data) || data.walletUpdatedAt is timestamp)
-        && (!('mustChangePassword' in data) || data.mustChangePassword is bool);
+        && (!('mustChangePassword' in data) || data.mustChangePassword is bool)
+        && (!('passwordChangeRequiredAt' in data) || data.passwordChangeRequiredAt is timestamp);
     }
 
     function isValidReservation(data) {
@@ -180,10 +182,7 @@ service cloud.firestore {
       allow update: if isOwner(userId)
         && isValidUser(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['fullName', 'phone', 'mustChangePassword'])
-        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['mustChangePassword'])
-          || (resource.data.mustChangePassword == true
-            && request.resource.data.mustChangePassword == false));
+          .hasOnly(['fullName', 'phone']);
       allow delete: if isAdmin();
     }
 
