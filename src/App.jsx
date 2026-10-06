@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
