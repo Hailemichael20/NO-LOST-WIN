@@ -4,7 +4,7 @@ service cloud.firestore {
     // Data model:
     // users/{uid}: private profile (name, phone); wallet fields are server-managed.
     // entries/{id}: private payment receipt and wallet-review state.
-    // ticketReservations/{tier-number}: private ticket holder details and two-hour expiry.
+    // ticketReservations/{tier-number}: private ticket holder details and six-hour expiry.
     // ticketBoard/{tier-number}: public-to-authenticated-users ticket, name, status,
     //   masked phone suffix, and owner UID; never contains a full phone number.
     // settings/{id}: prize/payment settings and bilingual published announcement.

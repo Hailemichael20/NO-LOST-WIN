@@ -2,9 +2,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
-import { isValidTicketNumber } from '../lib/ticket-constants.js';
+import { isValidTicketNumber, RESERVATION_DURATION_MS } from '../lib/ticket-constants.js';
 
-const RESERVATION_MS = 2 * 60 * 60 * 1000;
 const VALID_TIERS = [50, 100, 200, 500];
 
 export default async function handler(request, response) {
@@ -41,7 +40,7 @@ export default async function handler(request, response) {
     const reservationRef = db.collection('ticketReservations').doc(ticketId);
     const boardRef = db.collection('ticketBoard').doc(ticketId);
     const now = Date.now();
-    const expiresAt = Timestamp.fromMillis(now + RESERVATION_MS);
+    const expiresAt = Timestamp.fromMillis(now + RESERVATION_DURATION_MS);
 
     await db.runTransaction(async (transaction) => {
       const [reservationSnapshot, boardSnapshot] = await Promise.all([
