@@ -46,7 +46,7 @@ export default async function handler(request, response) {
       `Phone: ${entry.phone || 'Unknown'}`,
       `Category: ${entry.tier || 'Unknown'} Birr`,
       `Receipt: ${entry.receiptUrl || 'Unavailable'}`,
-      'Review it in the admin dashboard before approving the wallet credit.',
+      'Use the buttons below to approve or reject this registration.',
     ].join('\n');
 
     const telegramResponse = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -55,6 +55,12 @@ export default async function handler(request, response) {
       body: JSON.stringify({
         chat_id: process.env.TELEGRAM_CHAT_ID,
         text: message,
+        reply_markup: {
+          inline_keyboard: [[
+            { text: 'Approve', callback_data: `approve:${entryId}` },
+            { text: 'Reject', callback_data: `reject:${entryId}` },
+          ]],
+        },
         disable_web_page_preview: false,
       }),
     });

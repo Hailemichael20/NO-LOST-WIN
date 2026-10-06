@@ -50,7 +50,7 @@ Receipt images upload directly from the browser to Cloudinary. Before each uploa
 
 The Vercel API reflects only same-origin requests and exact origins listed in `CORS_ALLOWED_ORIGINS`; it does not allow arbitrary origins. The Cloudinary upload endpoint supports browser uploads directly. For local Vite development against a deployed Vercel API, set `VITE_API_BASE_URL` to that Vercel deployment URL and add the exact Vite origin to `CORS_ALLOWED_ORIGINS`. Leave `VITE_API_BASE_URL` empty when the frontend and API are served from the same Vercel deployment.
 
-Create a Telegram bot with `@BotFather`, send it one message from your Telegram account, and get your numeric chat ID if receipt alerts are needed.
+Create a Telegram bot with `@BotFather`, send it one message from the chat where you want receipt notifications, and get that chat's ID. Set `TELEGRAM_ADMIN_USER_ID` to the numeric Telegram user ID that is allowed to use the Approve/Reject buttons. Set a strong `TELEGRAM_WEBHOOK_SECRET` and configure the bot's Telegram `setWebhook` URL as `https://<your-vercel-domain>/api/telegram-webhook`, with that same value as `secret_token` and `callback_query` included in `allowed_updates`. Telegram sends this token in the `X-Telegram-Bot-Api-Secret-Token` header; the webhook rejects requests without the matching token. Receipt approval from Telegram uses the same server-side transaction as the admin dashboard, including wallet credit and ticket confirmation. Rejected or approved registrations cannot be reviewed again from Telegram.
 
 ### Vercel environment variables
 
@@ -74,6 +74,8 @@ Add these server-only values for the environments you deploy:
 ```text
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 TELEGRAM_CHAT_ID=your-telegram-chat-id
+TELEGRAM_ADMIN_USER_ID=your-numeric-telegram-user-id
+TELEGRAM_WEBHOOK_SECRET=your-random-telegram-webhook-secret
 FIREBASE_PROJECT_ID=your-firebase-project-id
 FIREBASE_CLIENT_EMAIL=your-firebase-service-account-email
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
@@ -94,4 +96,4 @@ VITE_API_BASE_URL=https://your-app.vercel.app
 
 Push the project to GitHub, import it in Vercel, add the environment variables, and deploy. Confirm receipt upload and (if configured) Telegram notification from the deployed site.
 
-Firebase service-account credentials and the Cloudinary API secret are server-only Vercel variables. Do not put them in browser-exposed `VITE_` variables. `FIREBASE_PRIVATE_KEY` must preserve newlines or use `\\n` sequences. Telegram alerts are for review only; wallet credit still requires administrator approval in the admin dashboard.
+Firebase service-account credentials and the Cloudinary API secret are server-only Vercel variables. Do not put them in browser-exposed `VITE_` variables. `FIREBASE_PRIVATE_KEY` must preserve newlines or use `\\n` sequences. Telegram credentials, the admin user ID, and the webhook secret are also server-only; redeploy after adding them and configure Telegram's webhook using the same secret.
