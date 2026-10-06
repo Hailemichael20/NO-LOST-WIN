@@ -1,18 +1,24 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
-import { auth, isFirebaseConfigured } from './firebaseConfig';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db, isFirebaseConfigured } from './firebaseConfig';
 
 // Import your page components
 const LotteryRegistration = lazy(() => import('./components/LotteryRegistration'));
 const LotteryWheel = lazy(() => import('./components/LotteryWheel'));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const AuthPage = lazy(() => import('./components/AuthPage'));
+const ChangePassword = lazy(() => import('./components/ChangePassword'));
 import Announcements from './components/Announcements';
 import { translations } from './translations';
 
 export default function App() {
   const [user, setUser] = useState(undefined);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState('');
+  const [profileRetry, setProfileRetry] = useState(0);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [timeoutExceeded, setTimeoutExceeded] = useState(false);
   const [language, setLanguage] = useState(() => localStorage.getItem('ethio-draw-language') || 'en');
   const t = translations[language] || translations.en;
@@ -34,6 +40,9 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u || null);
+      setProfileLoading(Boolean(u));
+      setProfileError('');
+      if (!u) setMustChangePassword(false);
       clearTimeout(timeout);
     }, (error) => {
       console.error('Auth error:', error);
@@ -46,6 +55,27 @@ export default function App() {
       clearTimeout(timeout);
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+    setProfileLoading(true);
+    setProfileError('');
+
+    getDoc(doc(db, 'users', user.uid))
+      .then((snapshot) => {
+        if (active) setMustChangePassword(snapshot.data()?.mustChangePassword === true);
+      })
+      .catch((error) => {
+        console.error('User security profile error:', error);
+        if (active) setProfileError(t.profileLoadError);
+      })
+      .finally(() => {
+        if (active) setProfileLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [user, profileRetry, t.profileLoadError]);
 
   if (!isFirebaseConfigured) {
     return (
@@ -65,7 +95,7 @@ export default function App() {
         <Navbar user={user} language={language} setLanguage={changeLanguage} />
 
         <main className="container mx-auto w-full flex-grow px-4 py-8 sm:px-6 sm:py-12">
-          {user === undefined ? (
+          {user === undefined || (user && profileLoading) ? (
             <div className="flex min-h-[60vh] items-center justify-center px-6 text-center">
               <div className="max-w-sm rounded-3xl bg-white p-8 shadow-xl">
                 <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-cyan-600" />
@@ -78,13 +108,24 @@ export default function App() {
                 )}
               </div>
             </div>
+          ) : profileError ? (
+            <div role="alert" className="mx-auto my-12 max-w-lg rounded-2xl border border-red-200 bg-white p-6 text-center shadow-lg">
+              <p className="font-semibold text-red-700">{profileError}</p>
+              <button
+                onClick={() => setProfileRetry((current) => current + 1)}
+                className="mt-4 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+              >
+                {t.retry}
+              </button>
+            </div>
           ) : (
             <Suspense fallback={<div className="py-16 text-center text-sm font-semibold text-slate-500">{t.loadingApp}</div>}>
               <Routes>
-                <Route path="/" element={user ? <Navigate to="/draw" replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
-                <Route path="/draw" element={user ? <LotteryRegistration user={user} language={language} /> : <Navigate to="/" replace />} />
-                <Route path="/wheel" element={user ? <LotteryWheel language={language} /> : <Navigate to="/" replace />} />
-                <Route path="/admin" element={user ? <AdminGuard language={language} /> : <Navigate to="/" replace />} />
+                <Route path="/" element={user ? <Navigate to={mustChangePassword ? '/change-password' : '/draw'} replace /> : <AuthPage language={language} setLanguage={changeLanguage} />} />
+                <Route path="/draw" element={user ? (mustChangePassword ? <Navigate to="/change-password" replace /> : <LotteryRegistration user={user} language={language} />) : <Navigate to="/" replace />} />
+                <Route path="/wheel" element={user ? (mustChangePassword ? <Navigate to="/change-password" replace /> : <LotteryWheel language={language} />) : <Navigate to="/" replace />} />
+                <Route path="/admin" element={user ? (mustChangePassword ? <Navigate to="/change-password" replace /> : <AdminGuard language={language} />) : <Navigate to="/" replace />} />
+                <Route path="/change-password" element={user ? <ChangePassword user={user} mustChangePassword={mustChangePassword} onPasswordChanged={() => setMustChangePassword(false)} language={language} /> : <Navigate to="/" replace />} />
               </Routes>
             </Suspense>
           )}
@@ -151,6 +192,17 @@ function Navbar({ user, language, setLanguage }) {
             >
               <span className="sm:hidden" aria-hidden="true">⚙</span>
               <span className="hidden sm:inline">{t.adminLink}</span>
+            </Link>
+          )}
+          {user && (
+            <Link
+              to="/change-password"
+              aria-label={t.changePasswordTitle}
+              title={t.changePasswordTitle}
+              className="rounded-lg px-2 py-2 text-xs font-bold text-slate-200 hover:bg-white/10 sm:px-3"
+            >
+              <span className="sm:hidden" aria-hidden="true">🔒</span>
+              <span className="hidden sm:inline">{t.changePasswordNav}</span>
             </Link>
           )}
           <label className="sr-only" htmlFor="app-language">{t.language}</label>

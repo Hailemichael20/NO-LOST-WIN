@@ -34,6 +34,8 @@ Number selection, receipt submission, and receipt approval use the Vercel `/api/
 
 The admin page is available at `/#/admin` (and from the navigation bar on mobile), but it does not use a client-side password. Grant the Firebase Auth user a custom claim named `admin` with the boolean value `true` using a trusted server or Firebase Admin SDK. Then sign out and back in so the refreshed ID token contains the claim. Sign-in accepts either an email address or the phone number used at registration. Firestore rules and the Vercel approval endpoint enforce the admin claim.
 
+Signed-in users can change their password from the navigation bar at any time. After resetting a user's password through a trusted Firebase Admin SDK process, set `users/{uid}.mustChangePassword` to `true`; the app redirects that user to the change-password page after sign-in. The user must authenticate with their temporary/current password, set a new password of at least six characters, and confirm it. The app clears the flag after the password update succeeds. Deploy the updated Firestore rules so only the owner can clear an existing `true` flag to `false`.
+
 Example trusted Admin SDK operation:
 
 ```js

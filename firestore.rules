@@ -22,7 +22,10 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasOnly(['fullName', 'phone', 'createdAt', 'winBirrBalance', 'walletUpdatedAt'])
+      return data.keys().hasOnly([
+          'fullName', 'phone', 'createdAt', 'winBirrBalance', 'walletUpdatedAt',
+          'mustChangePassword'
+        ])
         && data.fullName is string
         && data.fullName.size() > 0
         && data.fullName.size() <= 100
@@ -31,7 +34,8 @@ service cloud.firestore {
         && data.phone.size() <= 32
         && (!('createdAt' in data) || data.createdAt is timestamp)
         && (!('winBirrBalance' in data) || data.winBirrBalance is number)
-        && (!('walletUpdatedAt' in data) || data.walletUpdatedAt is timestamp);
+        && (!('walletUpdatedAt' in data) || data.walletUpdatedAt is timestamp)
+        && (!('mustChangePassword' in data) || data.mustChangePassword is bool);
     }
 
     function isValidReservation(data) {
@@ -175,7 +179,11 @@ service cloud.firestore {
         && request.resource.data.createdAt is timestamp;
       allow update: if isOwner(userId)
         && isValidUser(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullName', 'phone']);
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['fullName', 'phone', 'mustChangePassword'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['mustChangePassword'])
+          || (resource.data.mustChangePassword == true
+            && request.resource.data.mustChangePassword == false));
       allow delete: if isAdmin();
     }
 
