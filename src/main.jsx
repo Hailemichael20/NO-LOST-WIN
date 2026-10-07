@@ -5,20 +5,29 @@ import './index.css'
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
-      .then((registration) => {
-        registration.update().catch((error) => {
-          console.error('Service worker update check failed:', error)
-        })
-
-        const checkForUpdates = () => {
-          if (document.visibilityState === 'visible') {
-            registration.update().catch((error) => {
-              console.error('Service worker update check failed:', error)
-            })
+    const serviceWorkerUrl = new URL('/sw.js', window.location.origin).href
+    const serviceWorkerOptions = { scope: '/', updateViaCache: 'none' }
+    navigator.serviceWorker.register(serviceWorkerUrl, serviceWorkerOptions)
+      .then(async (registration) => {
+        const checkForUpdates = async () => {
+          try {
+            const worker = registration.active || registration.waiting || registration.installing
+            if (worker && worker.scriptURL !== serviceWorkerUrl) {
+              await registration.unregister()
+              await navigator.serviceWorker.register(serviceWorkerUrl, serviceWorkerOptions)
+              return
+            }
+            if (registration.active?.state === 'activated') await registration.update()
+          } catch (error) {
+            console.error('Service worker update check failed:', error)
           }
         }
-        document.addEventListener('visibilitychange', checkForUpdates)
+
+        await checkForUpdates()
+        const onVisibilityChange = () => {
+          if (document.visibilityState === 'visible') void checkForUpdates()
+        }
+        document.addEventListener('visibilitychange', onVisibilityChange)
 
         const hadController = Boolean(navigator.serviceWorker.controller)
         const reloadOnUpdate = () => {

@@ -6,8 +6,8 @@ service cloud.firestore {
     //   are server-managed.
     // entries/{id}: private payment receipt and wallet-review state.
     // ticketReservations/{tier-number}: private ticket holder details and six-hour expiry.
-    // ticketBoard/{tier-number}: public-to-authenticated-users ticket, name, status,
-    //   masked phone suffix, and owner UID; never contains a full phone number.
+    // ticketBoard/{tier-number}: authenticated reservation details and ticket status.
+    // publicEntries/{tier-number}: public approved-ticket data; safe fields only.
     // settings/{id}: prize/payment settings and bilingual published announcement.
     // drawSchedule/{tier}: admin-managed draw timestamp.
     // drawEvents/{id}: immutable server-selected and authenticated-user-readable result.
@@ -18,7 +18,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && request.auth.token.admin == true;
+      return isAuthenticated() && request.auth.token.get('admin', false) == true;
     }
 
     function isOwner(uid) {
@@ -173,6 +173,13 @@ service cloud.firestore {
           && data.bodyAm is string
           && data.bodyAm.size() <= 4000
           && data.published is bool
+          && data.updatedAt is timestamp)
+        || (settingId == 'contact'
+          && data.keys().hasOnly(['phone', 'telegram', 'updatedAt'])
+          && data.phone is string
+          && data.phone.size() <= 40
+          && data.telegram is string
+          && data.telegram.size() <= 80
           && data.updatedAt is timestamp);
     }
 
@@ -182,6 +189,18 @@ service cloud.firestore {
         && data.tier == tier
         && data.drawAt is timestamp
         && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicEntry(data) {
+      return data.keys().hasOnly(['tier', 'number', 'status', 'phoneLast4'])
+        && data.keys().hasAll(['tier', 'number', 'status', 'phoneLast4'])
+        && data.tier in ['50', '100', '200', '500']
+        && data.number is string
+        && data.number.matches('^[0-9]{3}$')
+        && data.number != '000'
+        && data.status == 'approved'
+        && data.phoneLast4 is string
+        && data.phoneLast4.matches('^[0-9]{4}$');
     }
 
     match /users/{userId} {
@@ -199,6 +218,26 @@ service cloud.firestore {
 
     match /passwordResetRequests/{requestId} {
       allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /logs/{logId=**} {
+      allow read, write: if false;
+    }
+
+    match /adminLogs/{logId=**} {
+      allow read, write: if false;
+    }
+
+    match /passwordResetLogs/{logId=**} {
+      allow read, write: if false;
+    }
+
+    match /publicEntries/{entryId} {
+      // The server writes only the allow-listed public projection; status equality
+      // keeps collection queries compatible with Firestore rule evaluation.
+      allow get: if isValidPublicEntry(resource.data);
+      allow list: if resource.data.status == 'approved';
       allow write: if false;
     }
 
@@ -259,8 +298,8 @@ service cloud.firestore {
     }
 
     match /settings/{settingId} {
-      allow read: if isAuthenticated()
-        && settingId in ['prizes', 'payment', 'announcement'];
+      allow read: if settingId == 'contact'
+        || (isAuthenticated() && settingId in ['prizes', 'payment', 'announcement']);
       allow create, update: if isAdmin() && isValidSetting(settingId, request.resource.data);
       allow delete: if isAdmin();
     }

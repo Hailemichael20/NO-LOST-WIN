@@ -320,46 +320,17 @@ export default function AdminDashboard({ language }) {
     setUpdatingId(id);
     setActionMessage('');
     try {
-      if (newStatus === 'approved') {
-        const idToken = await auth.currentUser.getIdToken();
-        const response = await fetch(`${apiBaseUrl}/api/approve-receipt`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entryId: id }),
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Receipt approval failed.');
-        setActionMessage(t.receiptApproved.replace('{{amount}}', String(result.amount)));
-      } else {
-        const entryRef = doc(db, 'entries', id);
-        await runTransaction(db, async (transaction) => {
-          const entrySnapshot = await transaction.get(entryRef);
-          if (!entrySnapshot.exists()) throw new Error('Entry not found.');
-          const entry = entrySnapshot.data();
-          let reservationRef;
-          let boardRef;
-          let reservationSnapshot;
-          let boardSnapshot;
-          if (entry.ticketReservationId) {
-            reservationRef = doc(db, 'ticketReservations', entry.ticketReservationId);
-            boardRef = doc(db, 'ticketBoard', entry.ticketReservationId);
-            [reservationSnapshot, boardSnapshot] = await Promise.all([
-              transaction.get(reservationRef),
-              transaction.get(boardRef),
-            ]);
-          }
-          transaction.update(entryRef, { status: newStatus, reviewedAt: new Date() });
-          if (reservationRef
-            && boardRef
-            && reservationSnapshot?.exists()
-            && reservationSnapshot.data().entryId === id
-            && boardSnapshot?.exists()) {
-            transaction.update(reservationRef, { status: newStatus });
-            transaction.update(boardRef, { status: newStatus });
-          }
-        });
-        setActionMessage(t.receiptRejected);
-      }
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${apiBaseUrl}/api/approve-receipt`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryId: id, status: newStatus }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Receipt review failed.');
+      setActionMessage(newStatus === 'approved'
+        ? t.receiptApproved.replace('{{amount}}', String(result.amount))
+        : t.receiptRejected);
     } catch (err) {
       console.error(`Failed to update status to ${newStatus}:`, err);
       setActionMessage(err.message === 'Entry not found.' ? t.genericError : t.saveFailed);

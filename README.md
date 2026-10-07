@@ -20,7 +20,7 @@ To change payment details for all devices without rebuilding the app, sign in as
 
 The language selector is shared across the application and remembers the selected language on each device. App pages, status messages, the administrator dashboard, and the lottery wheel provide English and Amharic text.
 
-Ticket numbers `#001`–`#500` are reserved independently for each entry category. A selection is held for six hours from the time it is made, giving admins six hours to review the registration. The registered list hides expired unconfirmed reservations and makes their numbers available again; confirmed numbers remain listed. Existing records above `#500` are retained but excluded from new draws. Other signed-in users see names and only the last four phone digits. Full phone numbers stay in owner/admin-only reservation and receipt records.
+Ticket numbers `#001`–`#500` are reserved independently for each entry category. A selection is held for six hours from the time it is made, giving admins six hours to review the registration. The registered list hides expired unconfirmed reservations and makes their numbers available again; confirmed numbers remain listed. Existing records above `#500` are retained but excluded from new draws. Active reservation details are available only to signed-in users; public approved-ticket records contain only category, number, status, and a masked phone suffix. Full phone numbers stay in owner/admin-only reservation and receipt records.
 
 Admins can publish bilingual notices from the admin page (`/#/admin`); signed-in users see them in the expandable **Announcements** panel at the bottom of the page.
 
@@ -28,7 +28,7 @@ Admins can publish bilingual notices from the admin page (`/#/admin`); signed-in
 
 The home page displays the per-category schedule in Ethiopia time (`Africa/Addis_Ababa`) and switches to a live countdown during the final five days. Admins can save one schedule per category from **Draw schedule** on the admin page (`/#/admin`). After the scheduled time, only the authenticated admin can start the draw. The server freezes the approved `ticketBoard` numbers, hashes the ordered list, selects the winning number with a cryptographic random generator, and records an immutable `drawEvents` document. A second draw for that category requires a written reason and is recorded as a redraw. The live wheel listens for those events; the client animation only visualizes the already-selected result.
 
-The wheel and draw endpoint both read approved numbers from `ticketBoard`. Receipt approval already updates that document in the same transaction as the receipt and wallet; clients can read approved board documents and cannot write draw events or draw locks. The `ticketBoard` (`tier`, `status`, `number`) and `drawEvents` (`tier`, `createdAt`) composite indexes are in `firestore.indexes.json`.
+The server draw endpoint reads approved numbers from `ticketBoard`. The public wheel and registered list read the separate `publicEntries` collection, which contains only the approved ticket's tier, number, status, and masked phone suffix. Receipt approval writes that sanitized document in the same transaction as the receipt and wallet; client writes to `publicEntries`, draw events, and draw locks are denied. The `ticketBoard`/`publicEntries` (`tier`, `status`, `number`) and `drawEvents` (`tier`, `createdAt`) composite indexes are in `firestore.indexes.json`.
 
 Deploy the frontend, API, Firestore rules, and indexes after changing draw behavior:
 
@@ -37,6 +37,14 @@ npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes
 ```
 
 Then redeploy the Vercel project so `/api/perform-draw`, `/api/server-time`, and the updated frontend are published together. In the admin page, choose a future Ethiopia-local date and time for each category and save it. At or after that time, use **Spin**. Further spins require at least 10 characters of written redraw reason. Check the category card on the home page or open `/#/wheel` to verify the result propagates live.
+
+After deploying the public ticket collection change, run the one-time migration with Firebase Admin credentials configured in the environment:
+
+```bash
+node scripts/migrate-public-entries.js
+```
+
+It synchronizes existing approved ticket entries into `publicEntries` and removes stale public ticket documents. Contact details at `settings/contact` are publicly readable for the login page and writable only by an admin.
 
 After deploying this change, deploy the Firestore rules and composite index as well as the web app:
 

@@ -18,9 +18,19 @@ export default async function handler(request, response) {
     if (token.admin !== true) return response.status(403).json({ error: 'Administrator access is required.' });
 
     const entryId = request.body?.entryId;
+    const status = request.body?.status || 'approved';
     if (typeof entryId !== 'string' || !entryId) return response.status(400).json({ error: 'A receipt entry ID is required.' });
+    if (!['approved', 'rejected'].includes(status)) {
+      return response.status(400).json({ error: 'A valid receipt review status is required.' });
+    }
 
-    const result = await reviewReceipt(getFirestore(app), entryId, 'approved', token.uid);
+    const result = await reviewReceipt(
+      getFirestore(app),
+      entryId,
+      status,
+      token.uid,
+      { onlyPending: status === 'rejected' },
+    );
 
     return response.status(200).json(result);
   } catch (error) {

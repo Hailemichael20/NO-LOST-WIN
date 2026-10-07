@@ -186,10 +186,15 @@ export default function LotteryRegistration({ user, language }) {
 
     const updateReservations = () => {
       setReservations(
-        [...activeReservations, ...confirmedReservations].map((item) => ({
-          ...item,
-          phone: ownerReservations.get(item.id)?.phone,
-        })),
+        [...activeReservations, ...confirmedReservations].map((item) => {
+          const ownerReservation = ownerReservations.get(item.id);
+          return {
+            ...item,
+            ownerUid: ownerReservation ? user.uid : item.ownerUid,
+            fullName: ownerReservation?.fullName || item.fullName || '',
+            phone: ownerReservation?.phone,
+          };
+        }),
       );
       if (activeLoaded && confirmedLoaded && ownerLoaded) setReservationsLoading(false);
     };
@@ -215,9 +220,10 @@ export default function LotteryRegistration({ user, language }) {
     );
     const unsubscribeConfirmed = onSnapshot(
       query(
-        collection(db, 'ticketBoard'),
+        collection(db, 'publicEntries'),
         where('tier', '==', String(selectedTier)),
         where('status', '==', 'approved'),
+        orderBy('number', 'asc'),
       ),
       (snapshot) => {
         confirmedReservations = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -605,7 +611,7 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
                 return (
                   <div key={item.id} className="rounded-2xl bg-white/5 px-4 py-3">
                     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
-                      <span className="min-w-0"><strong className="mr-2 font-mono text-cyan-300">#{String(item.number).padStart(3, '0')}</strong><span className="font-semibold">{item.fullName}</span></span>
+                      <span className="min-w-0"><strong className="mr-2 font-mono text-cyan-300">#{String(item.number).padStart(3, '0')}</strong><span className="font-semibold">{item.fullName || t.confirmed}</span></span>
                       <span className="break-all text-xs text-slate-300">{item.ownerUid === userId ? item.phone || item.phoneLast4 : `${t.phoneHidden} ····${item.phoneLast4}`}</span>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${item.status === 'approved' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-300/15 text-amber-200'}`}>{statusLabels[item.status] || t.reserved}</span>
                     </div>

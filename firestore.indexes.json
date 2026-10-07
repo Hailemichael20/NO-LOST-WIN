@@ -83,6 +83,15 @@
       ]
     },
     {
+      "collectionGroup": "publicEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tier", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "number", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "drawEvents",
       "queryScope": "COLLECTION",
       "fields": [

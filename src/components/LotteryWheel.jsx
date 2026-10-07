@@ -49,7 +49,7 @@ export default function LotteryWheel({ language }) {
     if (animationTimerRef.current) clearTimeout(animationTimerRef.current);
 
     const approvedTicketsQuery = query(
-      collection(db, 'ticketBoard'),
+      collection(db, 'publicEntries'),
       where('tier', '==', String(selectedTier)),
       where('status', '==', 'approved'),
       orderBy('number', 'asc'),
