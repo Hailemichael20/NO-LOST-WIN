@@ -1,6 +1,6 @@
 import { auth } from './firebaseConfig';
 
-export const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+export const apiBaseUrl = '';
 
 export async function uploadReceiptImage(file, onProgress = () => {}) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { translations, translate } from '../translations';
 import { isEligibleDrawTicket, MAX_TICKET_NUMBER } from '../../lib/ticket-constants';
 import { getWheelAlignmentDegrees } from '../../lib/lottery-wheel';
@@ -23,6 +23,7 @@ export default function LotteryWheel({ language }) {
   
   const [rotationDegree, setRotationDegree] = useState(0);
   const [winner, setWinner] = useState(null);
+  const [drawEvent, setDrawEvent] = useState(null);
 
   const canvasRef = useRef(null);
   const fetchId = useRef(0);
@@ -34,18 +35,37 @@ export default function LotteryWheel({ language }) {
     setLoadError('');
     setParticipants([]);
     setWinner(null);
+    setDrawEvent(null);
     try {
       const q = query(
-        collection(db, 'ticketBoard'),
-        where('tier', '==', String(selectedTier)),
+        collection(db, 'publicApprovedTickets'),
+        where('tier', '==', Number(selectedTier)),
         where('status', '==', 'approved'),
-        where('number', '<=', String(MAX_TICKET_NUMBER))
       );
       const snapshot = await getDocs(q);
       const data = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter((ticket) => isEligibleDrawTicket(ticket, selectedTier));
-      if (fetchId.current === requestId) setParticipants(data);
+        .filter((ticket) => Number(ticket.number) >= 1 && Number(ticket.number) <= MAX_TICKET_NUMBER)
+        .sort((a, b) => Number(a.number) - Number(b.number));
+      if (fetchId.current === requestId) {
+        setParticipants(data);
+        const drawQuery = query(
+          collection(db, 'drawEvents'),
+          where('tier', '==', Number(selectedTier)),
+          orderBy('createdAt', 'desc'),
+          limit(1),
+        );
+        const drawSnapshot = await getDocs(drawQuery);
+        const latestDraw = drawSnapshot.docs[0]?.data() || null;
+        setDrawEvent(latestDraw);
+        if (latestDraw) {
+          setWinner({
+            number: latestDraw.winnerNumber,
+            tier: latestDraw.tier,
+            phoneLast4: latestDraw.winnerPhoneLast4,
+          });
+        }
+      }
     } catch (err) {
       console.error('Error fetching participants:', err);
       if (fetchId.current === requestId) setLoadError(t.entriesLoadError);
@@ -233,9 +253,12 @@ export default function LotteryWheel({ language }) {
         <div className="mt-6 p-5 bg-gradient-to-br from-amber-500/20 to-emerald-500/20 border-2 border-amber-400 rounded-2xl text-center animate-bounce">
           <span className="text-3xl mb-1 block">🎉</span>
           <h3 className="text-xl font-extrabold text-amber-300 uppercase">{t.winnerSelected}</h3>
-          <p className="text-2xl font-black text-white mt-1">{winner.fullName}</p>
-          <p className="text-sm font-mono text-emerald-400 mt-0.5">#{String(winner.number).padStart(3, '0')}</p>
+          <p className="text-2xl font-black text-white mt-1">#{String(winner.number).padStart(3, '0')}</p>
+          <p className="text-sm font-mono text-emerald-400 mt-0.5">{winner.phoneLast4 ? `••••${winner.phoneLast4}` : t.phoneHidden}</p>
           <p className="text-xs text-slate-400 mt-2">{t.category}: {winner.tier} {t.birr}</p>
+          {drawEvent?.frozenTicketsHash && (
+            <p className="text-[10px] text-slate-500 mt-2 break-all">{drawEvent.frozenTicketsHash.slice(0, 12)}</p>
+          )}
         </div>
       )}
     </div>

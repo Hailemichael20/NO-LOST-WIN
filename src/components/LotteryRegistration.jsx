@@ -345,6 +345,7 @@ export default function LotteryRegistration({ user, language }) {
         {step === 'categories' && <Link to="/wheel" className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-500 hover:text-cyan-700">{t.viewLottery}</Link>}
         {step !== 'categories' && <button onClick={() => { setCurrentReservation(null); setStep(step === 'numbers' ? 'categories' : 'numbers'); }} className="text-sm font-bold text-slate-600 underline underline-offset-4">{step === 'numbers' ? t.changeCategory : t.changeNumber}</button>}
       </div>
+      {step === 'categories' && <DrawCountdown t={t} />}
       {error && <p className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
       {step === 'categories' && <CategoryGrid onChoose={chooseTier} prizeAmounts={prizeAmounts} t={t} />}
       {step === 'numbers' && <>
@@ -400,6 +401,54 @@ function CategoryArt({ tier }) {
 
 function PrizeValue({ label, value, color, currency }) {
   return <div><span className={`block text-[10px] font-black uppercase ${color}`}>{label}</span><span className="mt-1 block text-xs font-bold text-slate-700">{value || 0} {currency}</span></div>;
+}
+
+function DrawCountdown({ t }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const getNextAddisDraw = (currentDate) => {
+    const etNow = new Date(currentDate.getTime() + 3 * 60 * 60 * 1000);
+    const nextDraw = new Date(etNow);
+    nextDraw.setUTCHours(20, 0, 0, 0);
+    if (nextDraw.getTime() <= etNow.getTime()) {
+      nextDraw.setUTCDate(nextDraw.getUTCDate() + 1);
+    }
+    return new Date(nextDraw.getTime() - 3 * 60 * 60 * 1000);
+  };
+
+  const nextDraw = getNextAddisDraw(new Date(now));
+  const remainingMs = Math.max(0, nextDraw.getTime() - now);
+  const hours = String(Math.floor(remainingMs / (1000 * 60 * 60))).padStart(2, '0');
+  const minutes = String(Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60))).padStart(2, '0');
+  const seconds = String(Math.floor((remainingMs % (1000 * 60)) / 1000)).padStart(2, '0');
+  const etFormatter = new Intl.DateTimeFormat('en-ET', {
+    timeZone: 'Africa/Addis_Ababa',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
+  return (
+    <div className="mb-6 rounded-[1.5rem] border border-cyan-200 bg-cyan-50 px-4 py-3 text-slate-900 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-cyan-700">{t.nextDrawLabel}</p>
+          <p className="mt-1 text-sm font-bold">{t.drawStartsAt}: {etFormatter.format(nextDraw)}</p>
+        </div>
+        <div className="rounded-full bg-white px-3 py-1.5 text-sm font-black text-cyan-800">
+          {t.drawCountdown}: {hours}:{minutes}:{seconds}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RegisteredList({ amount, reservations, loading, userId, t }) {
