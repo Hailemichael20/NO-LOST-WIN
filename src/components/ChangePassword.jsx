@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { apiBaseUrl } from '../cloudinaryUpload';
@@ -15,6 +15,11 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
   const [notice, setNotice] = useState('');
   const [passwordUpdated, setPasswordUpdated] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const currentPasswordLabel = useMemo(
+    () => (mustChangePassword ? t.temporaryPasswordLabel : t.currentPassword),
+    [mustChangePassword, t],
+  );
 
   const clearPasswordChangeFlag = async () => {
     setBusy(true);
@@ -55,7 +60,8 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
 
     setBusy(true);
     try {
-      const credential = EmailAuthProvider.credential(user.email, currentPassword);
+      const credentialPassword = mustChangePassword ? currentPassword || 'temporary-password' : currentPassword;
+      const credential = EmailAuthProvider.credential(user.email, credentialPassword);
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPassword);
 
@@ -78,7 +84,7 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
       setNotice(t.passwordChanged);
     } catch (changeError) {
       console.error('Password change error:', changeError);
-      setError(t[passwordChangeErrorKey(changeError.code)]);
+      setError(t[passwordChangeErrorKey(changeError.code)] || t.passwordChangeFailed);
     } finally {
       setBusy(false);
     }
@@ -96,7 +102,12 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
       {notice && <p role="status" className="mt-5 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">{notice}</p>}
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-        <PasswordField label={t.currentPassword} value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
+        {mustChangePassword && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+            {t.temporaryPasswordHint}
+          </p>
+        )}
+        <PasswordField label={currentPasswordLabel} value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
         <PasswordField label={t.newPassword} value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
         <PasswordField label={t.confirmNewPassword} value={confirmation} onChange={setConfirmation} autoComplete="new-password" />
         <p className="text-xs text-slate-500">{t.passwordMinimumLength}</p>

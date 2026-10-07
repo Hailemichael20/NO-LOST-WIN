@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { auth, db } from '../firebaseConfig';
 import {
   createUserWithEmailAndPassword,
@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   updateProfile,
 } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { translations } from '../translations';
 
 const MODES = {
@@ -20,11 +20,34 @@ export default function AuthPage({ language, setLanguage }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryChoice, setRecoveryChoice] = useState('email');
+  const [resetIdentifier, setResetIdentifier] = useState('');
+  const [adminContact, setAdminContact] = useState({ phone: '+251930851916', telegram: '@ethiodraw' });
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
   const t = translations[language] || translations.en;
+
+  useEffect(() => {
+    let active = true;
+
+    if (!db) return undefined;
+    getDoc(doc(db, 'settings', 'contact'))
+      .then((snapshot) => {
+        if (active && snapshot.exists()) {
+          const data = snapshot.data();
+          setAdminContact({
+            phone: data.phone || adminContact.phone,
+            telegram: data.telegram || adminContact.telegram,
+          });
+        }
+      })
+      .catch((contactError) => console.error('Contact settings error:', contactError));
+
+    return () => { active = false; };
+  }, []);
 
   const switchMode = (nextMode) => {
     setMode(nextMode);
@@ -78,6 +101,7 @@ export default function AuthPage({ language, setLanguage }) {
     try {
       await sendPasswordResetEmail(auth, recoveryEmail);
       setMessage(t.successReset);
+      setShowRecoveryModal(false);
     } catch (authError) {
       setError(t.errorResetFailed);
     } finally {
@@ -85,21 +109,37 @@ export default function AuthPage({ language, setLanguage }) {
     }
   };
 
-  if (mode === 'reset') {
-    return (
-      <AuthShell language={language} setLanguage={setLanguage}>
-        <AuthHeader eyebrow={t.accountRecovery} title={t.recoveryTitle} copy={t.recoveryCopy} />
-        <Feedback error={error} message={message} />
-        <form onSubmit={handleReset} className="space-y-4">
-          <Field label={t.recoveryEmail} type="email" value={recoveryEmail} onChange={setRecoveryEmail} placeholder={t.placeholderEmail} />
-          <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-cyan-500 to-blue-600 py-3.5 text-sm font-bold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
-            {busy ? t.wait : t.recoveryButton}
-          </button>
-        </form>
-        <button onClick={() => switchMode('login')} className="pill-button mt-5 w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">{t.backToLogin}</button>
-      </AuthShell>
-    );
-  }
+  const handleAdminResetRequest = async (event) => {
+    event.preventDefault();
+    if (!resetIdentifier.trim()) {
+      setError(t.errorResetEmpty);
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const response = await fetch('/api/request-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: resetIdentifier.trim() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Request could not be sent.');
+      }
+      setMessage(payload.message || t.neutralResetMessage);
+      setResetIdentifier('');
+      setShowRecoveryModal(false);
+    } catch (resetError) {
+      console.error('Password reset request error:', resetError);
+      setError(resetError.message || t.errorResetFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const content = MODES[mode];
   return (
@@ -128,7 +168,58 @@ export default function AuthPage({ language, setLanguage }) {
           {busy ? t.wait : mode === 'login' ? t.authButtonLogin : t.authButtonRegister}
         </button>
       </form>
-      {mode === 'login' && <button onClick={() => switchMode('reset')} className="pill-button mt-5 w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">{t.recoverEmail}</button>}
+
+      {mode === 'login' && (
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <button type="button" onClick={() => setShowRecoveryModal(true)} className="pill-button w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">
+            {t.forgotPassword}
+          </button>
+          <button type="button" onClick={() => switchMode('login')} className="pill-button w-full py-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
+            {t.changePasswordLink}
+          </button>
+        </div>
+      )}
+
+      {showRecoveryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-black text-slate-900">{t.accountRecovery}</h3>
+              <button type="button" onClick={() => setShowRecoveryModal(false)} className="text-sm font-bold text-slate-500">✕</button>
+            </div>
+
+            <div className="mb-5 grid gap-2 sm:grid-cols-2">
+              <button type="button" onClick={() => setRecoveryChoice('email')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'email' ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                {t.recoverEmail}
+              </button>
+              <button type="button" onClick={() => setRecoveryChoice('admin')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'admin' ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                {t.contactAdmin}
+              </button>
+            </div>
+
+            {recoveryChoice === 'email' ? (
+              <form onSubmit={handleReset} className="space-y-4">
+                <Field label={t.recoveryEmail} type="email" value={recoveryEmail} onChange={setRecoveryEmail} placeholder={t.placeholderEmail} />
+                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-cyan-500 to-blue-600 py-3.5 text-sm font-bold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                  {busy ? t.wait : t.recoveryButton}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleAdminResetRequest} className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                  <p className="font-bold text-slate-900">{t.adminContact}</p>
+                  <p className="mt-1">{adminContact.phone}</p>
+                  <p className="mt-1">Telegram: {adminContact.telegram}</p>
+                </div>
+                <Field label={t.loginIdentifier} type="text" value={resetIdentifier} onChange={setResetIdentifier} placeholder={t.resetIdentifierHint} />
+                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-amber-500 to-orange-600 py-3.5 text-sm font-bold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                  {busy ? t.wait : t.requestReset}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </AuthShell>
   );
 }

@@ -20,6 +20,8 @@ export default function App() {
   const [profileRetry, setProfileRetry] = useState(0);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [timeoutExceeded, setTimeoutExceeded] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [language, setLanguage] = useState(() => localStorage.getItem('ethio-draw-language') || 'en');
   const t = translations[language] || translations.en;
 
@@ -31,6 +33,43 @@ export default function App() {
   useEffect(() => {
     document.title = `ETHIO-DRAW | ${t.lottery}`;
   }, [t.lottery]);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+      setShowInstallBanner(true);
+    };
+    const handleAppInstalled = () => {
+      setShowInstallBanner(false);
+      setInstallPrompt(null);
+    };
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      setShowInstallBanner(true);
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPrompt) {
+      setShowInstallBanner(false);
+      return;
+    }
+
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+    setShowInstallBanner(false);
+  };
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
@@ -130,6 +169,21 @@ export default function App() {
             </Suspense>
           )}
         </main>
+
+        {showInstallBanner && (
+          <div className="border-t border-slate-200 bg-slate-900 px-4 py-3 text-white">
+            <div className="mx-auto flex max-w-4xl flex-col items-center justify-between gap-3 text-center sm:flex-row sm:text-left">
+              <p className="text-sm font-semibold">
+                {installPrompt ? t.installAppPrompt : t.installIosPrompt}
+              </p>
+              {installPrompt && (
+                <button onClick={handleInstallApp} className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900">
+                  {t.installAppButton}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <footer className="border-t border-slate-200/70 px-4 py-6 text-center text-xs font-medium text-slate-400">
           {user && <Announcements language={language} />}
