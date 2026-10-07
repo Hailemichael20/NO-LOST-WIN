@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db, paymentConfig } from '../firebaseConfig';
 import { apiBaseUrl } from '../cloudinaryUpload';
-import { translations } from '../translations';
+import { translations, translate } from '../translations';
 import { 
+  Timestamp,
   collection, 
   query, 
   where, 
   onSnapshot, 
   doc, 
   orderBy,
+  limit,
   getDoc,
   runTransaction,
-  setDoc
+  setDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
+import { formatAddisDateTimeInput, parseAddisDateTimeInput } from '../../lib/draw-schedule';
 
 const TIERS = ['all', 50, 100, 200, 500];
 const STATUSES = ['pending', 'approved', 'rejected'];
@@ -40,6 +44,16 @@ export default function AdminDashboard({ language }) {
   const [announcement, setAnnouncement] = useState({ titleEn: '', bodyEn: '', titleAm: '', bodyAm: '' });
   const [announcementSaving, setAnnouncementSaving] = useState(false);
   const [announcementMessage, setAnnouncementMessage] = useState('');
+  const [drawSchedule, setDrawSchedule] = useState({});
+  const [drawScheduleError, setDrawScheduleError] = useState('');
+  const [drawScheduleMessage, setDrawScheduleMessage] = useState('');
+  const [drawScheduleLoading, setDrawScheduleLoading] = useState(true);
+  const [savingDrawTier, setSavingDrawTier] = useState(null);
+  const [latestDraws, setLatestDraws] = useState({});
+  const [drawEventsLoading, setDrawEventsLoading] = useState(true);
+  const [drawEventsError, setDrawEventsError] = useState('');
+  const [spinTier, setSpinTier] = useState(null);
+  const [redrawReasons, setRedrawReasons] = useState({});
   const [now, setNow] = useState(Date.now());
   const visibleEntries = entries.filter((entry) => (
     entry.status === 'approved'
@@ -103,6 +117,59 @@ export default function AdminDashboard({ language }) {
     loadPaymentDetails();
   }, []);
 
+  useEffect(() => {
+    return onSnapshot(collection(db, 'drawSchedule'), (snapshot) => {
+      const schedule = {};
+      snapshot.docs.forEach((scheduleDoc) => {
+        const drawAt = scheduleDoc.data().drawAt;
+        if (drawAt?.toDate) {
+          schedule[scheduleDoc.id] = {
+            drawAt,
+            dateTimeInput: formatAddisDateTimeInput(drawAt.toDate()),
+          };
+        }
+      });
+      setDrawSchedule(schedule);
+      setDrawScheduleError('');
+      setDrawScheduleLoading(false);
+    }, (error) => {
+      console.error('Draw schedule listener error:', { code: error.code, message: error.message }, error);
+      setDrawScheduleError(t.drawScheduleLoadError);
+      setDrawScheduleLoading(false);
+    });
+  }, [t.drawScheduleLoadError]);
+
+  useEffect(() => {
+    const loadedTiers = new Set();
+    const erroredTiers = new Set();
+    const unsubscribers = PRIZE_TIERS.map((tier) => {
+      const drawQuery = query(
+        collection(db, 'drawEvents'),
+        where('tier', '==', tier),
+        orderBy('createdAt', 'desc'),
+        limit(1),
+      );
+      return onSnapshot(drawQuery, (snapshot) => {
+        const drawDoc = snapshot.docs[0];
+        setLatestDraws((current) => ({
+          ...current,
+          [tier]: drawDoc ? { id: drawDoc.id, ...drawDoc.data() } : null,
+        }));
+        erroredTiers.delete(tier);
+        loadedTiers.add(tier);
+        if (loadedTiers.size === PRIZE_TIERS.length) setDrawEventsLoading(false);
+        if (erroredTiers.size === 0) setDrawEventsError('');
+      }, (error) => {
+        console.error('Admin draw event listener error:', { code: error.code, message: error.message }, error);
+        erroredTiers.add(tier);
+        loadedTiers.add(tier);
+        setDrawEventsLoading(loadedTiers.size !== PRIZE_TIERS.length);
+        setDrawEventsError(t.drawEventsLoadError);
+      });
+    });
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [t.drawEventsLoadError]);
+
   const updatePrize = (tier, place, value) => {
     setPrizeAmounts((current) => ({
       ...current,
@@ -163,6 +230,62 @@ export default function AdminDashboard({ language }) {
       setAnnouncementMessage(t.saveFailed);
     } finally {
       setAnnouncementSaving(false);
+    }
+  };
+
+  const saveDrawTime = async (event, tier) => {
+    event.preventDefault();
+    setDrawScheduleMessage('');
+    const drawAt = parseAddisDateTimeInput(drawSchedule[tier]?.dateTimeInput);
+    if (!drawAt || drawAt.getTime() <= Date.now()) {
+      setDrawScheduleMessage(t.invalidDrawTime);
+      return;
+    }
+
+    setSavingDrawTier(tier);
+    try {
+      await setDoc(doc(db, 'drawSchedule', String(tier)), {
+        tier: String(tier),
+        drawAt: Timestamp.fromDate(drawAt),
+        updatedAt: serverTimestamp(),
+      });
+      setDrawScheduleMessage(t.drawTimeSaved);
+    } catch (error) {
+      console.error('Draw schedule save error:', error);
+      setDrawScheduleMessage(t.drawScheduleSaveError);
+    } finally {
+      setSavingDrawTier(null);
+    }
+  };
+
+  const spinDraw = async (tier) => {
+    setSpinTier(tier);
+    setDrawScheduleMessage('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${apiBaseUrl}/api/perform-draw`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tier,
+          redrawReason: redrawReasons[tier] || '',
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || t.drawFailed);
+      setDrawScheduleMessage(translate(t.drawCompleted, {
+        tier: `${tier} ${t.birr}`,
+        number: String(result.winnerNumber).padStart(3, '0'),
+      }));
+      setRedrawReasons((current) => ({ ...current, [tier]: '' }));
+    } catch (error) {
+      console.error('Draw spin request error:', error);
+      setDrawScheduleMessage(error.message || t.drawFailed);
+    } finally {
+      setSpinTier(null);
     }
   };
 
@@ -292,6 +415,95 @@ export default function AdminDashboard({ language }) {
       </div>
 
       {actionMessage && <p className="mb-5 rounded-2xl bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800">{actionMessage}</p>}
+      <section className="mb-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="mb-4">
+          <h2 className="text-lg font-black text-gray-900">{t.drawSchedule}</h2>
+          <p className="mt-1 text-xs text-gray-500">{t.drawScheduleHelp}</p>
+        </div>
+        {drawScheduleError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{drawScheduleError}</p>}
+        {drawEventsError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{drawEventsError}</p>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          {PRIZE_TIERS.map((tier) => {
+            const schedule = drawSchedule[tier];
+            const latestDraw = latestDraws[tier];
+            const redrawReason = redrawReasons[tier] || '';
+            const drawIsReached = schedule?.drawAt?.toMillis?.() <= Date.now();
+            const drawButtonDisabled = drawScheduleLoading
+              || Boolean(drawScheduleError)
+              || drawEventsLoading
+              || Boolean(drawEventsError)
+              || spinTier !== null
+              || savingDrawTier !== null
+              || !schedule?.drawAt
+              || !drawIsReached
+              || (latestDraw && redrawReason.trim().length < 10);
+
+            return (
+              <form
+                key={tier}
+                onSubmit={(event) => saveDrawTime(event, tier)}
+                className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+              >
+                <h3 className="text-base font-black text-gray-900">{tier} {t.birr}</h3>
+                <label className="mt-3 block text-xs font-bold text-gray-600">
+                  {t.drawDateTimeAddis}
+                  <input
+                    required
+                    type="datetime-local"
+                    value={schedule?.dateTimeInput || ''}
+                    onChange={(event) => setDrawSchedule((current) => ({
+                      ...current,
+                      [tier]: { ...current[tier], dateTimeInput: event.target.value },
+                    }))}
+                    className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900"
+                  />
+                </label>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="submit"
+                    disabled={drawScheduleLoading || savingDrawTier !== null}
+                    className="min-h-10 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {savingDrawTier === tier ? t.saving : t.saveDrawTime}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={drawButtonDisabled}
+                    onClick={() => spinDraw(tier)}
+                    className="min-h-10 flex-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {spinTier === tier ? t.spinningWheel : latestDraw ? t.redraw : t.spin}
+                  </button>
+                </div>
+                {latestDraw && (
+                  <>
+                    <p className="mt-3 text-xs font-semibold text-emerald-700">
+                      {translate(t.previousDrawWinner, {
+                        number: String(latestDraw.winnerNumber).padStart(3, '0'),
+                      })}
+                    </p>
+                    <label className="mt-3 block text-xs font-bold text-gray-600">
+                      {t.redrawReason}
+                      <textarea
+                        value={redrawReason}
+                        maxLength={500}
+                        onChange={(event) => setRedrawReasons((current) => ({
+                          ...current,
+                          [tier]: event.target.value,
+                        }))}
+                        placeholder={t.redrawReasonPlaceholder}
+                        className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-normal text-gray-900"
+                        rows={2}
+                      />
+                    </label>
+                  </>
+                )}
+              </form>
+            );
+          })}
+        </div>
+        {drawScheduleMessage && <p role="status" className="mt-4 rounded-xl bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800">{drawScheduleMessage}</p>}
+      </section>
 
       {/* Control Toolbar (Status & Tier Filters) */}
       <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:justify-between sm:p-4">

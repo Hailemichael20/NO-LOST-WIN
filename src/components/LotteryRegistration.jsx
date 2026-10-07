@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { auth, db, paymentConfig } from '../firebaseConfig';
-import { Timestamp, collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { Timestamp, collection, doc, getDoc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { apiBaseUrl, uploadReceiptImage } from '../cloudinaryUpload';
 import { translations, translate } from '../translations';
 import { MAX_TICKET_NUMBER } from '../../lib/ticket-constants';
@@ -44,6 +44,85 @@ export default function LotteryRegistration({ user, language }) {
   const [error, setError] = useState('');
   const [prizeAmounts, setPrizeAmounts] = useState(DEFAULT_PRIZES);
   const [paymentDetails, setPaymentDetails] = useState(paymentConfig);
+  const [drawSchedule, setDrawSchedule] = useState({});
+  const [latestDraws, setLatestDraws] = useState({});
+  const [drawScheduleError, setDrawScheduleError] = useState('');
+  const [drawEventsError, setDrawEventsError] = useState('');
+  const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
+  const [serverTimeError, setServerTimeError] = useState(false);
+
+  useEffect(() => onSnapshot(collection(db, 'drawSchedule'), (snapshot) => {
+    const nextSchedule = {};
+    snapshot.docs.forEach((scheduleDoc) => {
+      const drawAt = scheduleDoc.data().drawAt;
+      if (drawAt?.toDate) nextSchedule[scheduleDoc.id] = drawAt;
+    });
+    setDrawSchedule(nextSchedule);
+    setDrawScheduleError('');
+  }, (scheduleError) => {
+    console.error('Draw schedule listener error:', {
+      code: scheduleError.code,
+      message: scheduleError.message,
+    }, scheduleError);
+    setDrawScheduleError(t.drawScheduleLoadError);
+  }), [t.drawScheduleLoadError]);
+
+  useEffect(() => {
+    const erroredTiers = new Set();
+    const unsubscribers = TIERS.map(({ amount }) => {
+      const latestDrawQuery = query(
+        collection(db, 'drawEvents'),
+        where('tier', '==', amount),
+        orderBy('createdAt', 'desc'),
+        limit(1),
+      );
+      return onSnapshot(latestDrawQuery, (snapshot) => {
+        const drawDoc = snapshot.docs[0];
+        setLatestDraws((current) => ({
+          ...current,
+          [amount]: drawDoc ? { id: drawDoc.id, ...drawDoc.data() } : null,
+        }));
+        erroredTiers.delete(amount);
+        if (erroredTiers.size === 0) setDrawEventsError('');
+      }, (drawError) => {
+        console.error('Draw event listener error:', {
+          code: drawError.code,
+          message: drawError.message,
+        }, drawError);
+        erroredTiers.add(amount);
+        setDrawEventsError(t.drawEventsLoadError);
+      });
+    });
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [t.drawEventsLoadError]);
+
+  useEffect(() => {
+    let active = true;
+    const syncServerTime = async () => {
+      const startedAt = Date.now();
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/server-time`);
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !Number.isFinite(result.serverNow)) {
+          throw new Error(result.error || 'Server time response was invalid.');
+        }
+        const receivedAt = Date.now();
+        if (active) {
+          setServerTimeOffsetMs(result.serverNow - (startedAt + receivedAt) / 2);
+          setServerTimeError(false);
+        }
+      } catch (error) {
+        console.error('Server clock sync error:', error);
+        if (active) setServerTimeError(true);
+      }
+    };
+    syncServerTime();
+    const interval = setInterval(syncServerTime, 5 * 60 * 1000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -345,9 +424,28 @@ export default function LotteryRegistration({ user, language }) {
         {step === 'categories' && <Link to="/wheel" className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-500 hover:text-cyan-700">{t.viewLottery}</Link>}
         {step !== 'categories' && <button onClick={() => { setCurrentReservation(null); setStep(step === 'numbers' ? 'categories' : 'numbers'); }} className="text-sm font-bold text-slate-600 underline underline-offset-4">{step === 'numbers' ? t.changeCategory : t.changeNumber}</button>}
       </div>
-      {step === 'categories' && <DrawCountdown t={t} />}
+      {step === 'categories' && (drawScheduleError || drawEventsError) && (
+        <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          {drawScheduleError || drawEventsError}
+        </p>
+      )}
+      {step === 'categories' && serverTimeError && (
+        <p role="status" className="mb-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {t.serverTimeUnavailable}
+        </p>
+      )}
       {error && <p className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-      {step === 'categories' && <CategoryGrid onChoose={chooseTier} prizeAmounts={prizeAmounts} t={t} />}
+      {step === 'categories' && (
+        <CategoryGrid
+          onChoose={chooseTier}
+          prizeAmounts={prizeAmounts}
+          drawSchedule={drawSchedule}
+          latestDraws={latestDraws}
+          serverTimeOffsetMs={serverTimeOffsetMs}
+          language={language}
+          t={t}
+        />
+      )}
       {step === 'numbers' && <>
         <RegisteredList amount={selectedTier} reservations={reservations} loading={reservationsLoading} userId={user.uid} t={t} />
         <TicketPicker
@@ -367,8 +465,39 @@ export default function LotteryRegistration({ user, language }) {
   );
 }
 
-function CategoryGrid({ onChoose, prizeAmounts, t }) {
-  return <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{TIERS.map((tier) => <button key={tier.amount} onClick={() => onChoose(tier.amount)} className="group overflow-hidden rounded-[1.75rem] bg-white text-left shadow-lg shadow-slate-900/5 transition hover:-translate-y-1 hover:shadow-xl focus-visible:outline focus-visible:outline-4 focus-visible:outline-cyan-400"><CategoryArt tier={tier} /><div className="p-5"><p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">{t[tier.label]}</p><p className="mt-1 text-3xl font-black text-slate-950">{tier.amount} <span className="text-base font-bold text-slate-500">{t.birr}</span></p><div className="mt-5 grid grid-cols-3 gap-1 border-t border-slate-100 pt-4 text-center"><PrizeValue label={t.prizeFirst} value={prizeAmounts[tier.amount]?.first} color="text-emerald-600" currency={t.birr} /><PrizeValue label={t.prizeSecond} value={prizeAmounts[tier.amount]?.second} color="text-orange-600" currency={t.birr} /><PrizeValue label={t.prizeThird} value={prizeAmounts[tier.amount]?.third} color="text-cyan-700" currency={t.birr} /></div></div></button>)}</div>;
+function CategoryGrid({ onChoose, prizeAmounts, drawSchedule, latestDraws, serverTimeOffsetMs, language, t }) {
+  const now = useCurrentTime(1000) + serverTimeOffsetMs;
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {TIERS.map((tier) => (
+        <button
+          key={tier.amount}
+          onClick={() => onChoose(tier.amount)}
+          className="group overflow-hidden rounded-[1.75rem] bg-white text-left shadow-lg shadow-slate-900/5 transition hover:-translate-y-1 hover:shadow-xl focus-visible:outline focus-visible:outline-4 focus-visible:outline-cyan-400"
+        >
+          <CategoryArt tier={tier} />
+          <div className="p-5">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">{t[tier.label]}</p>
+            <p className="mt-1 text-3xl font-black text-slate-950">
+              {tier.amount} <span className="text-base font-bold text-slate-500">{t.birr}</span>
+            </p>
+            <DrawTimeInfo
+              drawAt={drawSchedule[tier.amount]}
+              draw={latestDraws[tier.amount]}
+              now={now}
+              language={language}
+              t={t}
+            />
+            <div className="mt-5 grid grid-cols-3 gap-1 border-t border-slate-100 pt-4 text-center">
+              <PrizeValue label={t.prizeFirst} value={prizeAmounts[tier.amount]?.first} color="text-emerald-600" currency={t.birr} />
+              <PrizeValue label={t.prizeSecond} value={prizeAmounts[tier.amount]?.second} color="text-orange-600" currency={t.birr} />
+              <PrizeValue label={t.prizeThird} value={prizeAmounts[tier.amount]?.third} color="text-cyan-700" currency={t.birr} />
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function CategoryArt({ tier }) {
@@ -403,50 +532,46 @@ function PrizeValue({ label, value, color, currency }) {
   return <div><span className={`block text-[10px] font-black uppercase ${color}`}>{label}</span><span className="mt-1 block text-xs font-bold text-slate-700">{value || 0} {currency}</span></div>;
 }
 
-function DrawCountdown({ t }) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const getNextAddisDraw = (currentDate) => {
-    const etNow = new Date(currentDate.getTime() + 3 * 60 * 60 * 1000);
-    const nextDraw = new Date(etNow);
-    nextDraw.setUTCHours(20, 0, 0, 0);
-    if (nextDraw.getTime() <= etNow.getTime()) {
-      nextDraw.setUTCDate(nextDraw.getUTCDate() + 1);
-    }
-    return new Date(nextDraw.getTime() - 3 * 60 * 60 * 1000);
-  };
-
-  const nextDraw = getNextAddisDraw(new Date(now));
-  const remainingMs = Math.max(0, nextDraw.getTime() - now);
-  const hours = String(Math.floor(remainingMs / (1000 * 60 * 60))).padStart(2, '0');
-  const minutes = String(Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60))).padStart(2, '0');
-  const seconds = String(Math.floor((remainingMs % (1000 * 60)) / 1000)).padStart(2, '0');
-  const etFormatter = new Intl.DateTimeFormat('en-ET', {
+function DrawTimeInfo({ drawAt, draw, now, language, t }) {
+  const drawTime = drawAt?.toMillis?.();
+  const remaining = Number.isFinite(drawTime) ? drawTime - now : null;
+  const formatter = new Intl.DateTimeFormat(language === 'am' ? 'am-ET' : 'en-ET', {
     timeZone: 'Africa/Addis_Ababa',
-    weekday: 'short',
+    weekday: 'long',
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
   });
 
+  if (draw) {
+    return (
+      <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+        {translate(t.drawWinner, { number: String(draw.winnerNumber).padStart(3, '0') })}
+      </p>
+    );
+  }
+  if (remaining === null) {
+    return <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">{t.drawNotScheduled}</p>;
+  }
+  if (remaining <= 0) {
+    return <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{t.drawTimeReached}</p>;
+  }
+
+  const daysLeft = Math.floor(remaining / 86400000);
+  const hours = Math.floor((remaining % 86400000) / 3600000);
+  const minutes = Math.floor((remaining % 3600000) / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
   return (
-    <div className="mb-6 rounded-[1.5rem] border border-cyan-200 bg-cyan-50 px-4 py-3 text-slate-900 shadow-sm">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-cyan-700">{t.nextDrawLabel}</p>
-          <p className="mt-1 text-sm font-bold">{t.drawStartsAt}: {etFormatter.format(nextDraw)}</p>
-        </div>
-        <div className="rounded-full bg-white px-3 py-1.5 text-sm font-black text-cyan-800">
-          {t.drawCountdown}: {hours}:{minutes}:{seconds}
-        </div>
-      </div>
+    <div className="mt-4 rounded-xl bg-cyan-50 px-3 py-2 text-xs text-cyan-900">
+      <p className="font-bold">{t.drawDateTime}: {formatter.format(new Date(drawTime))}</p>
+      {remaining <= 5 * 86400000 && (
+        <p className="mt-1 font-black">
+          {t.drawCountdown}: {daysLeft} {t.days} {String(hours).padStart(2, '0')} {t.hours}{' '}
+          {String(minutes).padStart(2, '0')} {t.minutes} {String(seconds).padStart(2, '0')} {t.seconds}
+        </p>
+      )}
     </div>
   );
 }

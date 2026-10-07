@@ -24,6 +24,20 @@ Ticket numbers `#001`–`#500` are reserved independently for each entry categor
 
 Admins can publish bilingual notices from the admin page (`/#/admin`); signed-in users see them in the expandable **Announcements** panel at the bottom of the page.
 
+## Draw schedule and live wheel
+
+The home page displays the per-category schedule in Ethiopia time (`Africa/Addis_Ababa`) and switches to a live countdown during the final five days. Admins can save one schedule per category from **Draw schedule** on the admin page (`/#/admin`). After the scheduled time, only the authenticated admin can start the draw. The server freezes the approved `ticketBoard` numbers, hashes the ordered list, selects the winning number with a cryptographic random generator, and records an immutable `drawEvents` document. A second draw for that category requires a written reason and is recorded as a redraw. The live wheel listens for those events; the client animation only visualizes the already-selected result.
+
+The wheel and draw endpoint both read approved numbers from `ticketBoard`. Receipt approval already updates that document in the same transaction as the receipt and wallet; clients can read approved board documents and cannot write draw events or draw locks. The `ticketBoard` (`tier`, `status`, `number`) and `drawEvents` (`tier`, `createdAt`) composite indexes are in `firestore.indexes.json`.
+
+Deploy the frontend, API, Firestore rules, and indexes after changing draw behavior:
+
+```bash
+npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes
+```
+
+Then redeploy the Vercel project so `/api/perform-draw`, `/api/server-time`, and the updated frontend are published together. In the admin page, choose a future Ethiopia-local date and time for each category and save it. At or after that time, use **Spin**. Further spins require at least 10 characters of written redraw reason. Check the category card on the home page or open `/#/wheel` to verify the result propagates live.
+
 After deploying this change, deploy the Firestore rules and composite index as well as the web app:
 
 ```bash
@@ -33,6 +47,8 @@ npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes
 Number selection, receipt submission, and receipt approval use the Vercel `/api/reserve-ticket`, `/api/submit-receipt`, and `/api/approve-receipt` endpoints. Redeploy the Vercel app so all three endpoints and the frontend are updated together. The server creates ticket reservations atomically, and approval checks that the six-hour reservation is still valid before confirming the ticket and crediting the wallet.
 
 The admin page is available at `/#/admin` (and from the navigation bar on mobile), but it does not use a client-side password. Grant the Firebase Auth user a custom claim named `admin` with the boolean value `true` using a trusted server or Firebase Admin SDK. Then sign out and back in so the refreshed ID token contains the claim. Sign-in accepts either an email address or the phone number used at registration. Firestore rules and the Vercel approval endpoint enforce the admin claim.
+
+Admins can open **Password** from the navigation bar (or visit `/#/change-password`) to view **User password resets** above **My password**. The reset section shows pending requests in real time and lets admins search registered users by name, phone number, or ticket number. Deploy the updated Firestore rules and Vercel app for this section to work; the app redeploy also updates `/api/admin-reset-password`.
 
 Signed-in users can change their password from the navigation bar at any time. After resetting a user's password through a trusted Firebase Admin SDK process, set `users/{uid}.mustChangePassword` to `true` and set `users/{uid}.passwordChangeRequiredAt` to a server timestamp. The app redirects that user to the change-password page after sign-in. The user must authenticate with their temporary/current password, set a new password of at least six characters, and confirm it. The authenticated Vercel endpoint clears the flag only when Firebase Auth confirms the password was updated after that timestamp. Firestore rules do not allow clients (including signed-in admins) to set or clear either password-reset field; Admin SDK writes bypass these rules.
 
