@@ -19,6 +19,24 @@ async function answerCallbackQuery(botToken, callbackQueryId, text) {
   }
 }
 
+async function editReviewedMessage(botToken, message, resultText) {
+  if (!message?.chat?.id || !Number.isInteger(message.message_id)) return;
+  const telegramResponse = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: message.chat.id,
+      message_id: message.message_id,
+      text: `${message.text || 'Receipt review'}\n\n${resultText}`,
+      reply_markup: { inline_keyboard: [] },
+    }),
+  });
+  const result = await telegramResponse.json();
+  if (!telegramResponse.ok || !result.ok) {
+    throw new Error('Telegram could not update the reviewed receipt message.');
+  }
+}
+
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     return response.status(405).json({ error: 'Method not allowed.' });
@@ -60,11 +78,12 @@ export default async function handler(request, response) {
     );
 
     const answer = result.alreadyFinal
-      ? 'This registration has already been reviewed.'
+      ? 'Already reviewed / አስቀድሞ ተገምግሟል።'
       : action.status === 'approved'
-        ? `Registration approved. ${result.amount} Birr credited.`
-        : 'Registration rejected.';
+        ? `Confirmed: ${result.amount} Birr credited / ተረጋግጧል፦ ${result.amount} ብር ተጨምሯል።`
+        : 'Rejected / ውድቅ ተደርጓል።';
     await answerCallbackQuery(botToken, callback.id, answer);
+    await editReviewedMessage(botToken, callback.message, answer);
     return response.status(200).json({ ok: true, alreadyFinal: result.alreadyFinal });
   } catch (error) {
     console.error('Telegram receipt review error:', error);

@@ -10,9 +10,18 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { translations } from '../translations';
 
 const MODES = {
-  login: { titleKey: 'loginTitle', actionKey: 'loginAction', switchText: 'Create an account', switchMode: 'register' },
-  register: { titleKey: 'registerTitle', actionKey: 'registerAction', switchText: 'Already have an account?', switchMode: 'login' },
+  login: { titleKey: 'loginTitle', actionKey: 'loginAction' },
+  register: { titleKey: 'registerTitle', actionKey: 'registerAction' },
 };
+
+async function notifyAdminOfPasswordRequest(identifier) {
+  const response = await fetch('/api/request-password-reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier }),
+  });
+  if (!response.ok) throw new Error('password-request-notification-failed');
+}
 
 export default function AuthPage({ language, setLanguage }) {
   const [mode, setMode] = useState('login');
@@ -100,6 +109,14 @@ export default function AuthPage({ language, setLanguage }) {
     setError('');
     try {
       await sendPasswordResetEmail(auth, recoveryEmail);
+      try {
+        await notifyAdminOfPasswordRequest(recoveryEmail.trim());
+      } catch (notificationError) {
+        console.error('Password reset notification error:', notificationError);
+        setError(t.resetNotificationFailed);
+        setShowRecoveryModal(false);
+        return;
+      }
       setMessage(t.successReset);
       setShowRecoveryModal(false);
     } catch (authError) {
@@ -112,7 +129,7 @@ export default function AuthPage({ language, setLanguage }) {
   const handleAdminResetRequest = async (event) => {
     event.preventDefault();
     if (!resetIdentifier.trim()) {
-      setError(t.errorResetEmpty);
+      setError(t.errorIdentifierEmpty);
       return;
     }
 
@@ -121,21 +138,13 @@ export default function AuthPage({ language, setLanguage }) {
     setMessage('');
 
     try {
-      const response = await fetch('/api/request-password-reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: resetIdentifier.trim() }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || 'Request could not be sent.');
-      }
-      setMessage(payload.message || t.neutralResetMessage);
+      await notifyAdminOfPasswordRequest(resetIdentifier.trim());
+      setMessage(t.neutralResetMessage);
       setResetIdentifier('');
       setShowRecoveryModal(false);
     } catch (resetError) {
       console.error('Password reset request error:', resetError);
-      setError(resetError.message || t.errorResetFailed);
+      setError(t.errorRequestFailed);
     } finally {
       setBusy(false);
     }
@@ -171,10 +180,10 @@ export default function AuthPage({ language, setLanguage }) {
 
       {mode === 'login' && (
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <button type="button" onClick={() => setShowRecoveryModal(true)} className="pill-button w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">
+          <button type="button" onClick={() => { setError(''); setRecoveryChoice('email'); setShowRecoveryModal(true); }} className="pill-button w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">
             {t.forgotPassword}
           </button>
-          <button type="button" onClick={() => switchMode('login')} className="pill-button w-full py-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
+          <button type="button" onClick={() => { setError(''); setRecoveryChoice('admin'); setShowRecoveryModal(true); }} className="pill-button w-full py-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
             {t.changePasswordLink}
           </button>
         </div>
@@ -189,10 +198,10 @@ export default function AuthPage({ language, setLanguage }) {
             </div>
 
             <div className="mb-5 grid gap-2 sm:grid-cols-2">
-              <button type="button" onClick={() => setRecoveryChoice('email')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'email' ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+              <button type="button" onClick={() => setRecoveryChoice('email')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'email' ? 'bg-cyan-600 !text-white' : 'bg-slate-100 !text-slate-700'}`}>
                 {t.recoverEmail}
               </button>
-              <button type="button" onClick={() => setRecoveryChoice('admin')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'admin' ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+              <button type="button" onClick={() => setRecoveryChoice('admin')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'admin' ? 'bg-cyan-600 !text-white' : 'bg-slate-100 !text-slate-700'}`}>
                 {t.contactAdmin}
               </button>
             </div>
@@ -200,7 +209,7 @@ export default function AuthPage({ language, setLanguage }) {
             {recoveryChoice === 'email' ? (
               <form onSubmit={handleReset} className="space-y-4">
                 <Field label={t.recoveryEmail} type="email" value={recoveryEmail} onChange={setRecoveryEmail} placeholder={t.placeholderEmail} />
-                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-cyan-500 to-blue-600 py-3.5 text-sm font-bold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-cyan-500 to-blue-600 py-3.5 text-sm font-bold !text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
                   {busy ? t.wait : t.recoveryButton}
                 </button>
               </form>
@@ -209,10 +218,10 @@ export default function AuthPage({ language, setLanguage }) {
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                   <p className="font-bold text-slate-900">{t.adminContact}</p>
                   <p className="mt-1">{adminContact.phone}</p>
-                  <p className="mt-1">Telegram: {adminContact.telegram}</p>
+                  <p className="mt-1">{t.telegramLabel}: {adminContact.telegram}</p>
                 </div>
                 <Field label={t.loginIdentifier} type="text" value={resetIdentifier} onChange={setResetIdentifier} placeholder={t.resetIdentifierHint} />
-                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-amber-500 to-orange-600 py-3.5 text-sm font-bold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-amber-500 to-orange-600 py-3.5 text-sm font-bold !text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
                   {busy ? t.wait : t.requestReset}
                 </button>
               </form>

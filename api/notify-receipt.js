@@ -26,27 +26,44 @@ export default async function handler(request, response) {
       return response.status(400).json({ error: 'A receipt entry ID is required.' });
     }
 
-    const entrySnapshot = await getFirestore(app).collection('entries').doc(entryId).get();
+    const db = getFirestore(app);
+    const [entrySnapshot, privateEntrySnapshot] = await Promise.all([
+      db.collection('entries').doc(entryId).get(),
+      db.collection('entryPrivate').doc(entryId).get(),
+    ]);
     if (!entrySnapshot.exists) {
       return response.status(404).json({ error: 'Receipt not found.' });
     }
 
     const entry = entrySnapshot.data();
-    if (entry.userId !== token.uid) {
+    const privateEntry = privateEntrySnapshot.exists ? privateEntrySnapshot.data() : entry;
+    if (privateEntry.userId !== token.uid) {
       return response.status(403).json({ error: 'You cannot notify for this receipt.' });
+    }
+    if (entry.status !== 'pending') {
+      return response.status(409).json({ error: 'Only pending receipts can be sent for review.' });
     }
 
     if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
       return response.status(503).json({ error: 'Telegram notification is not configured.' });
     }
 
+    const createdAt = entry.createdAt?.toDate
+      ? entry.createdAt.toDate()
+      : new Date();
+    const ticketNumber = entry.number || privateEntry.number;
     const message = [
-      'New payment receipt uploaded',
-      `Participant: ${entry.fullName || 'Unknown'}`,
-      `Phone: ${entry.phone || 'Unknown'}`,
-      `Category: ${entry.tier || 'Unknown'} Birr`,
-      `Receipt: ${entry.receiptUrl || 'Unavailable'}`,
-      'Use the buttons below to approve or reject this registration.',
+      'New payment receipt uploaded / አዲስ የክፍያ ደረሰኝ ተጭኗል',
+      `Name / ስም: ${privateEntry.fullName || 'Not provided'}`,
+      `Phone / ስልክ: ${privateEntry.phone || 'Not provided'}`,
+      `Category / ምድብ: ${entry.tier} Birr`,
+      `Number / ቁጥር: ${ticketNumber ? `#${String(ticketNumber).padStart(3, '0')}` : 'Not provided'}`,
+      `Time / ሰዓት: ${new Intl.DateTimeFormat('en-ET', {
+        timeZone: 'Africa/Addis_Ababa',
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+      }).format(createdAt)}`,
+      `Receipt / ደረሰኝ: ${privateEntry.receiptUrl || 'Unavailable'}`,
     ].join('\n');
 
     const telegramResponse = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -57,7 +74,7 @@ export default async function handler(request, response) {
         text: message,
         reply_markup: {
           inline_keyboard: [[
-            { text: 'Approve', callback_data: `approve:${entryId}` },
+            { text: 'Confirm', callback_data: `approve:${entryId}` },
             { text: 'Reject', callback_data: `reject:${entryId}` },
           ]],
         },
@@ -65,7 +82,8 @@ export default async function handler(request, response) {
       }),
     });
 
-    if (!telegramResponse.ok) {
+    const telegramResult = await telegramResponse.json();
+    if (!telegramResponse.ok || !telegramResult.ok) {
       return response.status(502).json({ error: 'Telegram notification failed.' });
     }
 

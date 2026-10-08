@@ -7,9 +7,10 @@ import { freezeTicketNumbers } from '../lib/draw-schedule.js';
 
 const VALID_TIERS = [50, 100, 200, 500];
 
-function drawError(statusCode, message) {
+function drawError(statusCode, code, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
+  error.code = code;
   return error;
 }
 
@@ -32,20 +33,23 @@ export default async function handler(request, response) {
 
     const tier = Number(request.body?.tier);
     if (!VALID_TIERS.includes(tier)) {
-      return response.status(400).json({ error: 'A valid draw category is required.' });
+      return response.status(400).json({ code: 'INVALID_CATEGORY', error: 'A valid draw category is required.' });
     }
     const redrawReason = typeof request.body?.redrawReason === 'string'
       ? request.body.redrawReason.trim()
       : '';
     if (redrawReason.length > 500) {
-      return response.status(400).json({ error: 'The redraw reason must be 500 characters or fewer.' });
+      return response.status(400).json({
+        code: 'INVALID_REDRAW_REASON',
+        error: 'The redraw reason must be 500 characters or fewer.',
+      });
     }
 
     const db = getFirestore(app);
     const scheduleRef = db.collection('drawSchedule').doc(String(tier));
     const lockRef = db.collection('drawLocks').doc(String(tier));
-    const approvedTicketsQuery = db.collection('ticketBoard')
-      .where('tier', '==', String(tier))
+    const approvedTicketsQuery = db.collection('entries')
+      .where('tier', '==', tier)
       .where('status', '==', 'approved')
       .orderBy('number', 'asc');
     const previousDrawQuery = db.collection('drawEvents')
@@ -65,23 +69,30 @@ export default async function handler(request, response) {
       ]);
 
       if (!scheduleSnapshot.exists) {
-        throw drawError(409, 'Set a draw time for this category before spinning.');
+        throw drawError(409, 'DRAW_NOT_SCHEDULED', 'Set a draw time for this category before spinning.');
       }
       const scheduledAt = scheduleSnapshot.data().drawAt;
       if (!scheduledAt?.toMillis || scheduledAt.toMillis() > Date.now()) {
-        throw drawError(409, 'The scheduled draw time has not been reached.');
+        throw drawError(409, 'DRAW_TIME_NOT_REACHED', 'The scheduled draw time has not been reached.');
       }
       if (!previousDrawSnapshot.empty && redrawReason.length < 10) {
-        throw drawError(400, 'A redraw reason of at least 10 characters is required.');
+        throw drawError(400, 'REDRAW_REASON_REQUIRED', 'A redraw reason of at least 10 characters is required.');
       }
 
       const ticketDocs = ticketsSnapshot.docs.map((ticketDoc) => ({
         id: ticketDoc.id,
         ...ticketDoc.data(),
       }));
-      const { numbers, canonicalList } = freezeTicketNumbers(tier, ticketDocs);
+      const { numbers, canonicalList, duplicateNumbers } = freezeTicketNumbers(tier, ticketDocs);
+      if (duplicateNumbers.length > 0) {
+        throw drawError(
+          409,
+          'DUPLICATE_APPROVED_TICKETS',
+          'Duplicate confirmed ticket numbers must be resolved before this draw.',
+        );
+      }
       if (numbers.length === 0) {
-        throw drawError(409, 'No approved tickets are available for this category.');
+        throw drawError(409, 'NO_APPROVED_TICKETS', 'No approved tickets are available for this category.');
       }
 
       const winningIndex = crypto.randomInt(numbers.length);
@@ -132,6 +143,7 @@ export default async function handler(request, response) {
   } catch (error) {
     console.error('Lottery draw error:', error);
     return response.status(error.statusCode || 500).json({
+      code: error.code || 'DRAW_FAILED',
       error: error.message || 'Could not complete the draw.',
     });
   }

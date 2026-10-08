@@ -42,6 +42,7 @@ export default async function handler(request, response) {
     const reservationRef = db.collection('ticketReservations').doc(reservationId);
     const boardRef = db.collection('ticketBoard').doc(reservationId);
     const entryRef = db.collection('entries').doc();
+    const privateEntryRef = db.collection('entryPrivate').doc(entryRef.id);
     const result = await db.runTransaction(async (transaction) => {
       const [reservationSnapshot, boardSnapshot] = await Promise.all([
         transaction.get(reservationRef),
@@ -67,20 +68,25 @@ export default async function handler(request, response) {
 
       const entry = {
         entryId: entryRef.id,
-        userId: user.uid,
-        email: user.email || '',
-        fullName: reservation.fullName,
-        phone: reservation.phone,
         tier: Number(reservation.tier),
-        ticketTier: reservation.tier,
         number: reservation.number,
         ticketReservationId: reservationId,
-        expiresAt: reservation.expiresAt,
-        receiptUrl,
+        phoneLast4: board.phoneLast4,
         status: 'pending',
         createdAt: FieldValue.serverTimestamp(),
       };
       transaction.create(entryRef, entry);
+      transaction.create(privateEntryRef, {
+        userId: user.uid,
+        email: user.email || '',
+        fullName: reservation.fullName,
+        phone: reservation.phone,
+        tier: reservation.tier,
+        number: reservation.number,
+        ticketReservationId: reservationId,
+        expiresAt: reservation.expiresAt,
+        receiptUrl,
+      });
       transaction.update(reservationRef, { status: 'pending', entryId: entryRef.id });
       transaction.update(boardRef, { status: 'pending' });
       return { entryId: entryRef.id };

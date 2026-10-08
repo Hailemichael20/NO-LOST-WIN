@@ -14,7 +14,7 @@ const TIERS = [
 ];
 const DEFAULT_PRIZES = Object.fromEntries(TIERS.map(({ amount }) => [amount, { first: 0, second: 0, third: 0 }]));
 
-const requestWithTimeout = async (url, options = {}, timeoutMs = 5000) => {
+const requestWithTimeout = async (url, options = {}, timeoutMs = 15000) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -41,6 +41,7 @@ export default function LotteryRegistration({ user, language }) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [notificationFailed, setNotificationFailed] = useState(false);
   const [error, setError] = useState('');
   const [prizeAmounts, setPrizeAmounts] = useState(DEFAULT_PRIZES);
   const [paymentDetails, setPaymentDetails] = useState(paymentConfig);
@@ -220,8 +221,8 @@ export default function LotteryRegistration({ user, language }) {
     );
     const unsubscribeConfirmed = onSnapshot(
       query(
-        collection(db, 'publicEntries'),
-        where('tier', '==', String(selectedTier)),
+        collection(db, 'entries'),
+        where('tier', '==', Number(selectedTier)),
         where('status', '==', 'approved'),
         orderBy('number', 'asc'),
       ),
@@ -360,6 +361,7 @@ export default function LotteryRegistration({ user, language }) {
 
     setLoading(true);
     setError('');
+    setNotificationFailed(false);
     setUploadProgress(0);
 
     try {
@@ -384,13 +386,15 @@ export default function LotteryRegistration({ user, language }) {
             method: 'POST',
             headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ entryId: submission.entryId }),
-          }, 5000);
+          });
 
           if (!notificationResponse.ok) {
             console.warn('Receipt saved, but Telegram notification was not sent.');
+            setNotificationFailed(true);
           }
         } catch (notifyError) {
           console.warn('Receipt saved, but Telegram notification request timed out or failed.', notifyError);
+          setNotificationFailed(true);
         }
       }
 
@@ -413,8 +417,9 @@ export default function LotteryRegistration({ user, language }) {
     }
   };
 
-  if (isSuccess) return <SuccessMessage amount={selectedTier} number={successNumber} t={t} onReset={() => {
+  if (isSuccess) return <SuccessMessage amount={selectedTier} number={successNumber} t={t} notificationFailed={notificationFailed} onReset={() => {
     setIsSuccess(false);
+    setNotificationFailed(false);
     setStep('categories');
     setSelectedTier(null);
     setSuccessNumber(null);
@@ -585,7 +590,7 @@ function DrawTimeInfo({ drawAt, draw, now, language, t }) {
 function RegisteredList({ amount, reservations, loading, userId, t }) {
   const now = useCurrentTime(15000);
   const active = reservations
-    .filter((item) => item.status === 'approved' || item.expiresAt?.toMillis() > now)
+    .filter((item) => item.status === 'approved' && Number.isInteger(Number(item.number)))
     .sort((left, right) => Number(left.number) - Number(right.number));
   const confirmedCount = active.filter((item) => item.status === 'approved').length;
   const statusLabels = { reserved: t.awaitingPayment, pending: t.underReview, approved: t.confirmed, rejected: t.rejected };
@@ -692,10 +697,11 @@ function ReceiptForm({ handleFileChange, filePreview, handleSubmit, loading, upl
   </form>;
 }
 
-function SuccessMessage({ amount, number, t, onReset }) {
+function SuccessMessage({ amount, number, t, notificationFailed, onReset }) {
   return <div className="mx-auto max-w-md rounded-[1.75rem] bg-white p-8 text-center shadow-xl">
     <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-3xl font-black text-emerald-600">✓</div>
     <h2 className="mt-5 text-2xl font-black text-slate-950">{t.receiptReceived}</h2>
+    {notificationFailed && <p role="alert" className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">{t.receiptNotificationFailed}</p>}
     <p className="mt-2 font-mono text-xl font-black text-cyan-700">#{String(number).padStart(3, '0')}</p>
     <p className="mt-2 text-sm leading-6 text-slate-500">{translate(t.pendingVerification, { amount, number })}</p>
     <button onClick={onReset} className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">{t.chooseAnother}</button>

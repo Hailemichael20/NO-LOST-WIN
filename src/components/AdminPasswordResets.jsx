@@ -69,7 +69,7 @@ export default function AdminPasswordResets({ user, language }) {
   }, [t.registeredUsersLoadError]);
 
   useEffect(() => {
-    return onSnapshot(collection(db, 'entries'), (snapshot) => {
+    return onSnapshot(collection(db, 'entryPrivate'), (snapshot) => {
       setEntries(snapshot.docs.map((entryDoc) => entryDoc.data()));
       setEntriesError('');
       setEntriesLoading(false);
@@ -131,7 +131,7 @@ export default function AdminPasswordResets({ user, language }) {
       setCopyMessage('');
     } catch (error) {
       console.error('Admin user password reset error:', error);
-      setResetError(error.message || t.passwordResetFailed);
+      setResetError(t.passwordResetFailed);
       setResetErrorUserId(actionId);
     } finally {
       setBusyUserId('');

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
@@ -18,8 +19,77 @@ function normalizeIdentifier(identifier) {
   return String(identifier || '').trim().toLowerCase();
 }
 
+function normalizePhone(identifier) {
+  const trimmed = String(identifier || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('+')) return trimmed;
+  if (trimmed.startsWith('0')) return `+251${trimmed.slice(1)}`;
+  return trimmed;
+}
+
+function phoneLoginEmail(phone) {
+  return `${normalizePhone(phone).replace(/\D/g, '')}@phone.playwin.local`;
+}
+
 function hashValue(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+async function findRequester(app, db, identifier) {
+  const adminAuth = getAuth(app);
+  const email = identifier.includes('@') ? identifier : phoneLoginEmail(identifier);
+  let authUser;
+  try {
+    authUser = await adminAuth.getUserByEmail(email);
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') throw error;
+  }
+
+  let profile;
+  if (authUser) {
+    const profileSnapshot = await db.collection('users').doc(authUser.uid).get();
+    profile = profileSnapshot.data() || {};
+  } else if (!identifier.includes('@')) {
+    const profileSnapshot = await db.collection('users')
+      .where('phone', '==', normalizePhone(identifier))
+      .limit(1)
+      .get();
+    if (!profileSnapshot.empty) {
+      profile = profileSnapshot.docs[0].data();
+      authUser = await adminAuth.getUser(profileSnapshot.docs[0].id);
+    }
+  }
+
+  return {
+    fullName: profile?.fullName || authUser?.displayName || 'Not available',
+    phone: profile?.phone || (identifier.includes('@') ? 'Not provided' : normalizePhone(identifier)),
+    email: authUser?.email?.endsWith('@phone.playwin.local')
+      ? 'Not provided'
+      : authUser?.email || (identifier.includes('@') ? identifier : 'Not provided'),
+  };
+}
+
+async function sendTelegramNotification(requester, botToken, chatId, createdAt) {
+  const message = [
+    'Password change/reset request / የይለፍ ቃል ለመቀየር ወይም ዳግም ለማስጀመር ጥያቄ',
+    `Name / ስም: ${requester.fullName}`,
+    `Phone / ስልክ: ${requester.phone}`,
+    `Email / ኢሜይል: ${requester.email}`,
+    `Time / ሰዓት: ${new Intl.DateTimeFormat('en-ET', {
+      timeZone: 'Africa/Addis_Ababa',
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+    }).format(createdAt)}`,
+  ].join('\n');
+  const telegramResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text: message }),
+  });
+  const telegramResult = await telegramResponse.json();
+  if (!telegramResponse.ok || !telegramResult.ok) {
+    throw new Error('Telegram password-reset notification failed.');
+  }
 }
 
 export default async function handler(request, response) {
@@ -30,6 +100,11 @@ export default async function handler(request, response) {
   const identifier = normalizeIdentifier(request.body?.identifier);
   if (!identifier || identifier.length < 3 || identifier.length > 128) {
     return response.status(400).json({ error: 'Please enter a valid phone number or email address.' });
+  }
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!botToken || !chatId) {
+    return response.status(503).json({ error: 'Telegram notification is not configured.' });
   }
 
   try {
@@ -66,6 +141,8 @@ export default async function handler(request, response) {
       return response.status(429).json({ error: 'Rate limit reached. Please try again later.' });
     }
 
+    const requester = await findRequester(app, db, identifier);
+    const createdAt = new Date(now);
     await db.collection('passwordResetRequests').add({
       identifier,
       identifierHash,
@@ -74,6 +151,13 @@ export default async function handler(request, response) {
       status: 'pending',
       source: 'public',
     });
+
+    try {
+      await sendTelegramNotification(requester, botToken, chatId, createdAt);
+    } catch (telegramError) {
+      console.error('Telegram password-reset notification error:', telegramError);
+      return response.status(502).json({ error: 'Password request was saved, but its Telegram notification failed.' });
+    }
 
     return response.status(200).json({
       ok: true,

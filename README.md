@@ -20,37 +20,31 @@ To change payment details for all devices without rebuilding the app, sign in as
 
 The language selector is shared across the application and remembers the selected language on each device. App pages, status messages, the administrator dashboard, and the lottery wheel provide English and Amharic text.
 
-Ticket numbers `#001`–`#500` are reserved independently for each entry category. A selection is held for six hours from the time it is made, giving admins six hours to review the registration. The registered list hides expired unconfirmed reservations and makes their numbers available again; confirmed numbers remain listed. Existing records above `#500` are retained but excluded from new draws. Active reservation details are available only to signed-in users; public approved-ticket records contain only category, number, status, and a masked phone suffix. Full phone numbers stay in owner/admin-only reservation and receipt records.
+Ticket numbers `#001`–`#500` are reserved independently for each entry category. A selection is held for six hours from the time it is made, giving admins six hours to review the registration. The registered list shows only approved (confirmed) receipt entries; active and pending reservations are used only to prevent number collisions. Existing records above `#500` are retained but excluded from new draws.
+
+The `entries` collection is the canonical source for each ticket's numeric category (`tier`), number, and review status (`pending`, `approved`, or `rejected`). The user list, wheel, admin receipt table, and draw endpoint all use that record. `entryPrivate/{entryId}` stores the receipt URL and personal details and can only be read by admins. Signed-in users can read approved entries; keep `entries` limited to public ticket fields and continue writing private details only to `entryPrivate`.
 
 Admins can publish bilingual notices from the admin page (`/#/admin`); signed-in users see them in the expandable **Announcements** panel at the bottom of the page.
 
 ## Draw schedule and live wheel
 
-The home page displays the per-category schedule in Ethiopia time (`Africa/Addis_Ababa`) and switches to a live countdown during the final five days. Admins can save one schedule per category from **Draw schedule** on the admin page (`/#/admin`). After the scheduled time, only the authenticated admin can start the draw. The server freezes the approved `ticketBoard` numbers, hashes the ordered list, selects the winning number with a cryptographic random generator, and records an immutable `drawEvents` document. A second draw for that category requires a written reason and is recorded as a redraw. The live wheel listens for those events; the client animation only visualizes the already-selected result.
+The home page displays the per-category schedule in Ethiopia time (`Africa/Addis_Ababa`) and switches to a live countdown during the final five days. Admins can save one schedule per category from **Draw schedule** on the admin page (`/#/admin`). After the scheduled time, only the authenticated admin can start the draw. The server freezes the approved `entries` numbers, hashes the ordered list, selects the winning number with a cryptographic random generator, and records an immutable `drawEvents` document. A second draw for that category requires a written reason and is recorded as a redraw. The live wheel listens for those events; the client animation only visualizes the already-selected result.
 
-The server draw endpoint reads approved numbers from `ticketBoard`. The public wheel and registered list read the separate `publicEntries` collection, which contains only the approved ticket's tier, number, status, and masked phone suffix. Receipt approval writes that sanitized document in the same transaction as the receipt and wallet; client writes to `publicEntries`, draw events, and draw locks are denied. The `ticketBoard`/`publicEntries` (`tier`, `status`, `number`) and `drawEvents` (`tier`, `createdAt`) composite indexes are in `firestore.indexes.json`.
+The server draw endpoint reads approved entries and selects the winner with Node's cryptographic `crypto.randomInt`; the admin can start the scheduled draw but cannot choose the winning number. It refuses to draw if legacy data contains duplicate approved numbers in a category; resolve any reported collision before drawing. Receipt approval updates the canonical entry, private review details, reservation, and wallet in one Firestore transaction. The wheel animates to the server-recorded result. The entry (`status`, `tier`, `number` / `createdAt`) and draw event (`tier`, `createdAt`) composite indexes are in `firestore.indexes.json`.
 
-Deploy the frontend, API, Firestore rules, and indexes after changing draw behavior:
-
-```bash
-npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes
-```
-
-Then redeploy the Vercel project so `/api/perform-draw`, `/api/server-time`, and the updated frontend are published together. In the admin page, choose a future Ethiopia-local date and time for each category and save it. At or after that time, use **Spin**. Further spins require at least 10 characters of written redraw reason. Check the category card on the home page or open `/#/wheel` to verify the result propagates live.
-
-After deploying the public ticket collection change, run the one-time migration with Firebase Admin credentials configured in the environment:
+Before deploying the new Firestore rules, back up the project and run the one-time migration during a brief maintenance window. It moves legacy receipt details into admin-only `entryPrivate` documents, converts category values to numbers, imports any approved ticket-board numbers that do not yet have an entry, and removes the obsolete `publicEntries` copies. The current app will no longer find its old public list after this step, so deploy the new rules/indexes and Vercel app immediately afterward:
 
 ```bash
 node scripts/migrate-public-entries.js
 ```
 
-It synchronizes existing approved ticket entries into `publicEntries` and removes stale public ticket documents. Contact details at `settings/contact` are publicly readable for the login page and writable only by an admin.
-
-After deploying this change, deploy the Firestore rules and composite index as well as the web app:
+After the migration finishes, deploy the rules and indexes, then redeploy Vercel so the API and frontend go live together:
 
 ```bash
 npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes
 ```
+
+In the admin page, choose a future Ethiopia-local date and time for each category and save it. At or after that time, use **Spin**. Further spins require at least 10 characters of written redraw reason. Check the category card on the home page or open `/#/wheel` to verify the result propagates live. Contact details at `settings/contact` are publicly readable for the login page and writable only by an admin.
 
 Number selection, receipt submission, and receipt approval use the Vercel `/api/reserve-ticket`, `/api/submit-receipt`, and `/api/approve-receipt` endpoints. Redeploy the Vercel app so all three endpoints and the frontend are updated together. The server creates ticket reservations atomically, and approval checks that the six-hour reservation is still valid before confirming the ticket and crediting the wallet.
 
@@ -87,7 +81,25 @@ Receipt images upload directly from the browser to Cloudinary. Before each uploa
 
 The Vercel API reflects only same-origin requests and exact origins listed in `CORS_ALLOWED_ORIGINS`; it does not allow arbitrary origins. The Cloudinary upload endpoint supports browser uploads directly. For local Vite development against a deployed Vercel API, set `VITE_API_BASE_URL` to that Vercel deployment URL and add the exact Vite origin to `CORS_ALLOWED_ORIGINS`. Leave `VITE_API_BASE_URL` empty when the frontend and API are served from the same Vercel deployment.
 
-Create a Telegram bot with `@BotFather`, send it one message from the chat where you want receipt notifications, and get that chat's ID. Set `TELEGRAM_ADMIN_USER_ID` to the numeric Telegram user ID that is allowed to use the Approve/Reject buttons. Set a strong `TELEGRAM_WEBHOOK_SECRET` and configure the bot's Telegram `setWebhook` URL as `https://<your-vercel-domain>/api/telegram-webhook`, with that same value as `secret_token` and `callback_query` included in `allowed_updates`. Telegram sends this token in the `X-Telegram-Bot-Api-Secret-Token` header; the webhook rejects requests without the matching token. Receipt approval from Telegram uses the same server-side transaction as the admin dashboard, including wallet credit and ticket confirmation. Rejected or approved registrations cannot be reviewed again from Telegram.
+Create a Telegram bot with `@BotFather`, then send it a message from the chat where you want receipt and password-reset notifications. Add these server-only Vercel variables:
+
+- `TELEGRAM_BOT_TOKEN`: the token from BotFather.
+- `TELEGRAM_CHAT_ID`: the destination chat ID for notifications.
+- `TELEGRAM_ADMIN_USER_ID`: your numeric Telegram user ID; only this user can press Confirm or Reject.
+- `TELEGRAM_WEBHOOK_SECRET`: a strong random secret used to authenticate Telegram webhook calls.
+
+Use Telegram's `getUpdates` method after sending a message to the bot to find `message.chat.id` for `TELEGRAM_CHAT_ID`; use the `from.id` of the person who will review receipts for `TELEGRAM_ADMIN_USER_ID`. These are different IDs when notifications go to a group.
+
+After adding the variables and deploying the Vercel API, set the webhook. Replace the placeholders with your real values and use your deployed Vercel domain:
+
+```bash
+curl --request POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  --data-urlencode "url=https://<your-vercel-domain>/api/telegram-webhook" \
+  --data-urlencode "secret_token=<TELEGRAM_WEBHOOK_SECRET>" \
+  --data-urlencode 'allowed_updates=["callback_query"]'
+```
+
+Telegram sends the secret in the `X-Telegram-Bot-Api-Secret-Token` header; the webhook rejects requests without the matching secret and ignores button clicks from any other Telegram user ID. Receipt messages include the participant, phone, category, number, Ethiopia-local time, and Cloudinary receipt link. Confirm/Reject runs the same server-side transaction as the admin dashboard and removes the buttons after review, preventing repeat actions. Password reset requests also send a notification with the requester's available name, phone, email, and time.
 
 ### Vercel environment variables
 
@@ -134,3 +146,21 @@ VITE_API_BASE_URL=https://your-app.vercel.app
 Push the project to GitHub, import it in Vercel, add the environment variables, and deploy. Confirm receipt upload and (if configured) Telegram notification from the deployed site.
 
 Firebase service-account credentials and the Cloudinary API secret are server-only Vercel variables. Do not put them in browser-exposed `VITE_` variables. `FIREBASE_PRIVATE_KEY` must preserve newlines or use `\\n` sequences. Telegram credentials, the admin user ID, and the webhook secret are also server-only; redeploy after adding them and configure Telegram's webhook using the same secret.
+
+## Resetting wallet balances
+
+The `scripts/reset-win-balances.js` script sets only `users/{uid}.winBirrBalance` to numeric `0`. It processes users in batches and does not change other user fields. Use server-side Firebase Admin credentials (`FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`), not the browser `VITE_FIREBASE_*` settings. Set those environment variables in your shell or load them from a secure local environment file before running the commands.
+
+Always run the dry-run first; it prints how many user documents would change without writing anything:
+
+```bash
+node scripts/reset-win-balances.js --dry-run
+```
+
+After verifying that the credentials point to the intended Firebase project and the count is expected, run the reset:
+
+```bash
+node scripts/reset-win-balances.js
+```
+
+The live run prints the final count of user documents it updated. Documents already containing numeric zero are not rewritten or counted.

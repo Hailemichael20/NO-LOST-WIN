@@ -26,6 +26,9 @@ const DEFAULT_PRIZES = Object.fromEntries(PRIZE_TIERS.map((tier) => [tier, { fir
 export default function AdminDashboard({ language }) {
   const t = translations[language] || translations.en;
   const [entries, setEntries] = useState([]);
+  const [privateEntries, setPrivateEntries] = useState({});
+  const [privateEntriesError, setPrivateEntriesError] = useState('');
+  const [privateEntriesLoaded, setPrivateEntriesLoaded] = useState(false);
   const [entriesError, setEntriesError] = useState('');
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -55,16 +58,33 @@ export default function AdminDashboard({ language }) {
   const [spinTier, setSpinTier] = useState(null);
   const [redrawReasons, setRedrawReasons] = useState({});
   const [now, setNow] = useState(Date.now());
-  const visibleEntries = entries.filter((entry) => (
+  const visibleEntries = entries
+    .map((entry) => ({ ...privateEntries[entry.id], ...entry }))
+    .filter((entry) => (
     entry.status === 'approved'
     || !entry.expiresAt?.toMillis
     || entry.expiresAt.toMillis() > now
-  ));
+    ));
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    setPrivateEntriesLoaded(false);
+    return onSnapshot(collection(db, 'entryPrivate'), (snapshot) => {
+      setPrivateEntries(Object.fromEntries(
+        snapshot.docs.map((entryDoc) => [entryDoc.id, entryDoc.data()]),
+      ));
+      setPrivateEntriesError('');
+      setPrivateEntriesLoaded(true);
+    }, (error) => {
+      console.error('Private receipt listener error:', error);
+      setPrivateEntriesError(t.entriesLoadError);
+      setPrivateEntriesLoaded(true);
+    });
+  }, [t.entriesLoadError]);
 
   useEffect(() => {
     const loadPrizes = async () => {
@@ -275,7 +295,17 @@ export default function AdminDashboard({ language }) {
         }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || t.drawFailed);
+      if (!response.ok) {
+        const errorMessages = {
+          DRAW_NOT_SCHEDULED: t.drawScheduleRequiredError,
+          DRAW_TIME_NOT_REACHED: t.drawTimeNotReachedError,
+          REDRAW_REASON_REQUIRED: t.redrawReasonRequiredError,
+          NO_APPROVED_TICKETS: t.noConfirmedTicketsError,
+          DUPLICATE_APPROVED_TICKETS: t.duplicateConfirmedTicketsError,
+        };
+        setDrawScheduleMessage(errorMessages[result.code] || t.drawFailed);
+        return;
+      }
       setDrawScheduleMessage(translate(t.drawCompleted, {
         tier: `${tier} ${t.birr}`,
         number: String(result.winnerNumber).padStart(3, '0'),
@@ -283,7 +313,7 @@ export default function AdminDashboard({ language }) {
       setRedrawReasons((current) => ({ ...current, [tier]: '' }));
     } catch (error) {
       console.error('Draw spin request error:', error);
-      setDrawScheduleMessage(error.message || t.drawFailed);
+      setDrawScheduleMessage(t.drawFailed);
     } finally {
       setSpinTier(null);
     }
@@ -333,7 +363,7 @@ export default function AdminDashboard({ language }) {
         : t.receiptRejected);
     } catch (err) {
       console.error(`Failed to update status to ${newStatus}:`, err);
-      setActionMessage(err.message === 'Entry not found.' ? t.genericError : t.saveFailed);
+      setActionMessage(t.saveFailed);
     } finally {
       setUpdatingId(null);
     }
@@ -361,6 +391,7 @@ export default function AdminDashboard({ language }) {
           }
         }
         transaction.delete(entryRef);
+        transaction.delete(doc(db, 'entryPrivate', id));
       });
     } catch (err) {
       console.error("Failed to delete record:", err);
@@ -606,10 +637,10 @@ export default function AdminDashboard({ language }) {
         {announcementMessage && <p className="mt-3 text-xs font-semibold text-cyan-700">{announcementMessage}</p>}
       </form>
 
-      {entriesError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{entriesError}</p>}
+      {(entriesError || privateEntriesError) && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{entriesError || privateEntriesError}</p>}
 
       {/* Data Table / List */}
-      {loading ? (
+      {loading || !privateEntriesLoaded ? (
         <div className="text-center py-20 text-gray-400 animate-pulse font-medium">{t.loadingSubmissions}</div>
       ) : visibleEntries.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-2xl border border-gray-200 text-gray-400">

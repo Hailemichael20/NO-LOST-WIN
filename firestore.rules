@@ -4,10 +4,10 @@ service cloud.firestore {
     // Data model:
     // users/{uid}: private profile (name, phone); wallet and password-reset fields
     //   are server-managed.
-    // entries/{id}: private payment receipt and wallet-review state.
+    // entries/{id}: canonical category, ticket number, and review state.
+    // entryPrivate/{id}: admin-only contact details and receipt image.
     // ticketReservations/{tier-number}: private ticket holder details and six-hour expiry.
     // ticketBoard/{tier-number}: authenticated reservation details and ticket status.
-    // publicEntries/{tier-number}: public approved-ticket data; safe fields only.
     // settings/{id}: prize/payment settings and bilingual published announcement.
     // drawSchedule/{tier}: admin-managed draw timestamp.
     // drawEvents/{id}: immutable server-selected and authenticated-user-readable result.
@@ -95,57 +95,19 @@ service cloud.firestore {
       return /databases/$(database)/documents/ticketReservations/$(reservationId);
     }
 
-    function validEntry(data) {
+    function isValidEntry(data) {
       return data.keys().hasOnly([
-          'entryId', 'userId', 'email', 'fullName', 'phone', 'tier', 'ticketTier', 'number',
-          'ticketReservationId', 'expiresAt', 'receiptUrl', 'status', 'createdAt',
-          'reviewedAt', 'approvedAt', 'approvedBy', 'walletTransactionId',
-          'isWinner', 'wonAt'
+          'entryId', 'tier', 'number', 'ticketReservationId', 'phoneLast4', 'status', 'createdAt'
         ])
-        && data.keys().hasAll([
-          'userId', 'fullName', 'phone', 'tier', 'receiptUrl', 'status', 'createdAt'
-        ])
-        && data.userId is string
-        && data.fullName is string
-        && data.fullName.size() > 0
-        && data.fullName.size() <= 100
-        && data.phone is string
-        && data.phone.size() >= 7
-        && data.phone.size() <= 32
+        && data.keys().hasAll(['tier', 'status', 'createdAt'])
         && data.tier in [50, 100, 200, 500]
-        && data.receiptUrl is string
-        && data.receiptUrl.matches('^https://.+')
         && data.status in ['pending', 'approved', 'rejected']
         && data.createdAt is timestamp
         && (!('entryId' in data) || data.entryId is string)
-        && (!('email' in data) || data.email is string)
-        && (!('number' in data) || (data.number is string && data.number.matches('^[0-9]{3}$') && data.number != '000'))
-        && (!('ticketTier' in data) || data.ticketTier in ['50', '100', '200', '500'])
+        && (!('number' in data)
+          || (data.number is string && data.number.matches('^[0-9]{3}$') && data.number != '000'))
         && (!('ticketReservationId' in data) || data.ticketReservationId is string)
-        && (!('expiresAt' in data) || data.expiresAt is timestamp)
-        && (!('reviewedAt' in data) || data.reviewedAt is timestamp)
-        && (!('approvedAt' in data) || data.approvedAt is timestamp)
-        && (!('approvedBy' in data) || data.approvedBy is string)
-        && (!('walletTransactionId' in data) || data.walletTransactionId is string)
-        && (!('isWinner' in data) || data.isWinner is bool)
-        && (!('wonAt' in data) || data.wonAt is timestamp)
-        && (('ticketReservationId' in data
-          && 'ticketTier' in data
-          && data.number is string
-          && data.ticketReservationId == data.ticketTier + '-' + data.number
-          && ((data.tier == 50 && data.ticketTier == '50')
-            || (data.tier == 100 && data.ticketTier == '100')
-            || (data.tier == 200 && data.ticketTier == '200')
-            || (data.tier == 500 && data.ticketTier == '500'))
-          && data.expiresAt is timestamp
-          && existsAfter(reservationPath(data.ticketReservationId))
-          && getAfter(reservationPath(data.ticketReservationId)).data.ownerUid == data.userId
-          && getAfter(reservationPath(data.ticketReservationId)).data.tier == data.ticketTier
-          && getAfter(reservationPath(data.ticketReservationId)).data.number == data.number
-          && getAfter(reservationPath(data.ticketReservationId)).data.entryId == data.entryId
-          && getAfter(reservationPath(data.ticketReservationId)).data.status == data.status
-          && getAfter(reservationPath(data.ticketReservationId)).data.expiresAt == data.expiresAt)
-          || (!('ticketReservationId' in data) && !('number' in data) && !('ticketTier' in data)));
+        && (!('phoneLast4' in data) || (data.phoneLast4 is string && data.phoneLast4.matches('^[0-9]{4}$')));
     }
 
     function isValidSetting(settingId, data) {
@@ -191,18 +153,6 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function isValidPublicEntry(data) {
-      return data.keys().hasOnly(['tier', 'number', 'status', 'phoneLast4'])
-        && data.keys().hasAll(['tier', 'number', 'status', 'phoneLast4'])
-        && data.tier in ['50', '100', '200', '500']
-        && data.number is string
-        && data.number.matches('^[0-9]{3}$')
-        && data.number != '000'
-        && data.status == 'approved'
-        && data.phoneLast4 is string
-        && data.phoneLast4.matches('^[0-9]{4}$');
-    }
-
     match /users/{userId} {
       allow read: if isAdmin() || isOwner(userId);
       allow create: if isOwner(userId)
@@ -233,14 +183,6 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /publicEntries/{entryId} {
-      // The server writes only the allow-listed public projection; status equality
-      // keeps collection queries compatible with Firestore rule evaluation.
-      allow get: if isValidPublicEntry(resource.data);
-      allow list: if resource.data.status == 'approved';
-      allow write: if false;
-    }
-
     match /drawSchedule/{tier} {
       allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidDrawSchedule(tier, request.resource.data);
@@ -259,13 +201,20 @@ service cloud.firestore {
     match /entries/{entryId} {
       allow create: if false;
       allow read: if isAdmin()
-        || (isAuthenticated() && resource.data.userId == request.auth.uid);
+        || (isAuthenticated() && resource.data.status == 'approved');
       allow update: if isAdmin()
-        && validEntry(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt'])
-        && request.resource.data.status == 'rejected'
-        && resource.data.status == 'pending';
+        && isValidEntry(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'number', 'phoneLast4'])
+        && resource.data.status in ['pending', 'rejected']
+        && request.resource.data.status in ['approved', 'rejected'];
       allow delete: if isAdmin() && resource.data.status != 'approved';
+    }
+
+    match /entryPrivate/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+      allow delete: if isAdmin();
     }
 
     match /ticketReservations/{reservationId} {

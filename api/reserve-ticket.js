@@ -39,13 +39,19 @@ export default async function handler(request, response) {
     const db = getFirestore(app);
     const reservationRef = db.collection('ticketReservations').doc(ticketId);
     const boardRef = db.collection('ticketBoard').doc(ticketId);
+    const confirmedEntryQuery = db.collection('entries')
+      .where('tier', '==', tier)
+      .where('number', '==', numberCode)
+      .where('status', '==', 'approved')
+      .limit(1);
     const now = Date.now();
     const expiresAt = Timestamp.fromMillis(now + RESERVATION_DURATION_MS);
 
     await db.runTransaction(async (transaction) => {
-      const [reservationSnapshot, boardSnapshot] = await Promise.all([
+      const [reservationSnapshot, boardSnapshot, confirmedEntrySnapshot] = await Promise.all([
         transaction.get(reservationRef),
         transaction.get(boardRef),
+        transaction.get(confirmedEntryQuery),
       ]);
       const isStillHeld = (snapshot) => {
         if (!snapshot.exists) return false;
@@ -53,7 +59,9 @@ export default async function handler(request, response) {
         return existing.status === 'approved' || existing.expiresAt?.toMillis() > now;
       };
 
-      if (isStillHeld(reservationSnapshot) || isStillHeld(boardSnapshot)) {
+      if (confirmedEntrySnapshot.size > 0
+        || isStillHeld(reservationSnapshot)
+        || isStillHeld(boardSnapshot)) {
         const error = new Error('Ticket number is already reserved.');
         error.code = 'TICKET_TAKEN';
         throw error;
