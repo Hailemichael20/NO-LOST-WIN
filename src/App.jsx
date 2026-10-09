@@ -22,7 +22,7 @@ export default function App() {
   const [timeoutExceeded, setTimeoutExceeded] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
-  const [language, setLanguage] = useState(() => localStorage.getItem('ethio-draw-language') || 'en');
+  const [language, setLanguage] = useState(() => localStorage.getItem('ethio-draw-language') || 'am');
   const t = translations[language] || translations.en;
 
   const changeLanguage = (nextLanguage) => {

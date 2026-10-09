@@ -86,10 +86,13 @@ export default async function handler(request, response) {
     }
 
     const temporaryPassword = buildTemporaryPassword();
-    await adminAuth.updateUser(targetUidFinal, { password: temporaryPassword });
+    const updatedUser = await adminAuth.updateUser(targetUidFinal, { password: temporaryPassword });
     await db.collection('users').doc(targetUidFinal).set({
       mustChangePassword: true,
       passwordChangeRequiredAt: FieldValue.serverTimestamp(),
+      ...(updatedUser.metadata.passwordUpdatedAt
+        ? { passwordChangeRequiredPasswordUpdatedAt: updatedUser.metadata.passwordUpdatedAt }
+        : {}),
     }, { merge: true });
 
     await db.collection('passwordResets').add({

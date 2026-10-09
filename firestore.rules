@@ -28,7 +28,8 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasOnly([
           'fullName', 'phone', 'createdAt', 'winBirrBalance', 'walletUpdatedAt',
-          'mustChangePassword', 'passwordChangeRequiredAt'
+          'mustChangePassword', 'passwordChangeRequiredAt',
+          'passwordChangeRequiredPasswordUpdatedAt'
         ])
         && data.fullName is string
         && data.fullName.size() > 0
@@ -40,7 +41,10 @@ service cloud.firestore {
         && (!('winBirrBalance' in data) || data.winBirrBalance is number)
         && (!('walletUpdatedAt' in data) || data.walletUpdatedAt is timestamp)
         && (!('mustChangePassword' in data) || data.mustChangePassword is bool)
-        && (!('passwordChangeRequiredAt' in data) || data.passwordChangeRequiredAt is timestamp);
+        && (!('passwordChangeRequiredAt' in data) || data.passwordChangeRequiredAt is timestamp)
+        && (!('passwordChangeRequiredPasswordUpdatedAt' in data)
+          || (data.passwordChangeRequiredPasswordUpdatedAt is string
+            && data.passwordChangeRequiredPasswordUpdatedAt.size() <= 40));
     }
 
     function isValidReservation(data) {

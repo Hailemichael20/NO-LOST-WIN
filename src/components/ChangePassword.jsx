@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { EmailAuthProvider, getIdTokenResult, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
 import { apiBaseUrl } from '../cloudinaryUpload';
 import { passwordChangeErrorKey, validateNewPassword } from '../../lib/password-change';
@@ -6,6 +7,8 @@ import { translations } from '../translations';
 import AdminPasswordResets from './AdminPasswordResets';
 
 export default function ChangePassword({ user, mustChangePassword, onPasswordChanged, language }) {
+  const navigate = useNavigate();
+  const redirectTimer = useRef(null);
   const t = translations[language] || translations.en;
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminCheckError, setAdminCheckError] = useState('');
@@ -15,6 +18,8 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => () => window.clearTimeout(redirectTimer.current), []);
 
   React.useEffect(() => {
     let active = true;
@@ -28,27 +33,6 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
       });
     return () => { active = false; };
   }, [t.adminToolsLoadError, user]);
-
-  const clearPasswordChangeFlag = async () => {
-    setBusy(true);
-    try {
-      const idToken = await user.getIdToken();
-      const response = await fetch(`${apiBaseUrl}/api/clear-password-change-flag`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || 'Could not clear the password-change requirement.');
-
-      onPasswordChanged();
-      setNotice(t.passwordChanged);
-    } catch (flagError) {
-      console.error('Could not clear required password change flag:', flagError);
-      setNotice(t.passwordChangedFlagFailed);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -67,30 +51,39 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
 
     setBusy(true);
     try {
-      const credentialPassword = mustChangePassword ? currentPassword || 'temporary-password' : currentPassword;
-      const credential = EmailAuthProvider.credential(user.email, credentialPassword);
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
       await reauthenticateWithCredential(user, credential);
       await updatePassword(user, newPassword);
 
       if (mustChangePassword) {
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmation('');
         try {
-          await clearPasswordChangeFlag();
+          const idToken = await user.getIdToken();
+          const response = await fetch(`${apiBaseUrl}/api/clear-password-change-flag`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${idToken}` },
+          });
+          if (!response.ok) {
+            throw new Error(`Password-change flag cleanup failed (${response.status}).`);
+          }
         } catch (flagError) {
           console.error('Could not clear required password change flag:', flagError);
         }
-        return;
       }
 
+      onPasswordChanged();
       setCurrentPassword('');
       setNewPassword('');
       setConfirmation('');
       setNotice(t.passwordChanged);
+      redirectTimer.current = window.setTimeout(() => {
+        navigate('/draw', { replace: true });
+      }, 1200);
     } catch (changeError) {
       console.error('Password change error:', changeError);
-      setError(t[passwordChangeErrorKey(changeError.code)] || t.passwordChangeFailed);
+      const errorKey = passwordChangeErrorKey(changeError.code);
+      setError(['wrongCurrentPassword', 'passwordTooWeak'].includes(errorKey)
+        ? t[errorKey]
+        : t.passwordChangeFailed);
     } finally {
       setBusy(false);
     }

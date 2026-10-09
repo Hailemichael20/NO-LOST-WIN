@@ -25,21 +25,23 @@ export default async function handler(request, response) {
     }
 
     const userRef = getFirestore(app).collection('users').doc(token.uid);
+    const userRecord = await adminAuth.getUser(token.uid);
     const result = await getFirestore(app).runTransaction(async (transaction) => {
       const snapshot = await transaction.get(userRef);
-      if (!snapshot.exists || snapshot.data().mustChangePassword !== true) {
-        return 'not-required';
+      if (!snapshot.exists || snapshot.data()?.mustChangePassword !== true) {
+        return 'cleared';
       }
 
-      const { passwordChangeRequiredAt } = snapshot.data();
-      if (!passwordChangeRequiredAt || typeof passwordChangeRequiredAt.toMillis !== 'function') {
+      const userData = snapshot.data();
+      const passwordRequirementBaseline = userData.passwordChangeRequiredPasswordUpdatedAt
+        || userData.passwordChangeRequiredAt;
+      if (!passwordRequirementBaseline) {
         return 'missing-requirement-time';
       }
 
-      const userRecord = await adminAuth.getUser(token.uid);
       if (!hasPasswordChangedSinceRequirement(
         userRecord.metadata.passwordUpdatedAt,
-        passwordChangeRequiredAt,
+        passwordRequirementBaseline,
       )) {
         return 'password-not-changed';
       }
@@ -47,6 +49,7 @@ export default async function handler(request, response) {
       transaction.update(userRef, {
         mustChangePassword: false,
         passwordChangeRequiredAt: FieldValue.delete(),
+        passwordChangeRequiredPasswordUpdatedAt: FieldValue.delete(),
       });
       return 'cleared';
     });
