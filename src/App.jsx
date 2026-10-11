@@ -3,6 +3,7 @@ import { HashRouter as Router, Routes, Route, Link, Navigate, useNavigate } from
 import { getIdTokenResult, onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from './firebaseConfig';
+import { isPasswordChangeRequired } from '../lib/password-change-required';
 
 // Import your page components
 const LotteryRegistration = lazy(() => import('./components/LotteryRegistration'));
@@ -103,7 +104,7 @@ export default function App() {
 
     getDoc(doc(db, 'users', user.uid))
       .then((snapshot) => {
-        if (active) setMustChangePassword(snapshot.data()?.mustChangePassword === true);
+        if (active) setMustChangePassword(isPasswordChangeRequired(snapshot.data()));
       })
       .catch((error) => {
         console.error('User security profile error:', error);

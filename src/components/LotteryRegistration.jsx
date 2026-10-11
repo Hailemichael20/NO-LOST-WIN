@@ -47,8 +47,10 @@ export default function LotteryRegistration({ user, language }) {
   const [paymentDetails, setPaymentDetails] = useState(paymentConfig);
   const [drawSchedule, setDrawSchedule] = useState({});
   const [latestDraws, setLatestDraws] = useState({});
+  const [activeRounds, setActiveRounds] = useState({});
   const [drawScheduleError, setDrawScheduleError] = useState('');
   const [drawEventsError, setDrawEventsError] = useState('');
+  const [drawRoundsError, setDrawRoundsError] = useState('');
   const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
   const [serverTimeError, setServerTimeError] = useState(false);
 
@@ -96,6 +98,27 @@ export default function LotteryRegistration({ user, language }) {
     });
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [t.drawEventsLoadError]);
+
+  useEffect(() => {
+    const unsubscribers = TIERS.map(({ amount }) => onSnapshot(
+      doc(db, 'drawRounds', String(amount)),
+      (snapshot) => {
+        setActiveRounds((current) => ({
+          ...current,
+          [amount]: snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null,
+        }));
+        setDrawRoundsError('');
+      },
+      (roundError) => {
+        console.error('Draw round listener error:', {
+          code: roundError.code,
+          message: roundError.message,
+        }, roundError);
+        setDrawRoundsError(t.drawRoundsLoadError);
+      },
+    ));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [t.drawRoundsLoadError]);
 
   useEffect(() => {
     let active = true;
@@ -435,9 +458,9 @@ export default function LotteryRegistration({ user, language }) {
         {step === 'categories' && <Link to="/wheel" className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-500 hover:text-cyan-700">{t.viewLottery}</Link>}
         {step !== 'categories' && <button onClick={() => { setCurrentReservation(null); setStep(step === 'numbers' ? 'categories' : 'numbers'); }} className="text-sm font-bold text-slate-600 underline underline-offset-4">{step === 'numbers' ? t.changeCategory : t.changeNumber}</button>}
       </div>
-      {step === 'categories' && (drawScheduleError || drawEventsError) && (
+      {step === 'categories' && (drawScheduleError || drawEventsError || drawRoundsError) && (
         <p role="alert" className="mb-5 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-          {drawScheduleError || drawEventsError}
+          {drawScheduleError || drawEventsError || drawRoundsError}
         </p>
       )}
       {step === 'categories' && serverTimeError && (
@@ -452,6 +475,7 @@ export default function LotteryRegistration({ user, language }) {
           prizeAmounts={prizeAmounts}
           drawSchedule={drawSchedule}
           latestDraws={latestDraws}
+          activeRounds={activeRounds}
           serverTimeOffsetMs={serverTimeOffsetMs}
           language={language}
           t={t}
@@ -476,7 +500,7 @@ export default function LotteryRegistration({ user, language }) {
   );
 }
 
-function CategoryGrid({ onChoose, prizeAmounts, drawSchedule, latestDraws, serverTimeOffsetMs, language, t }) {
+function CategoryGrid({ onChoose, prizeAmounts, drawSchedule, latestDraws, activeRounds, serverTimeOffsetMs, language, t }) {
   const now = useCurrentTime(1000) + serverTimeOffsetMs;
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -492,9 +516,9 @@ function CategoryGrid({ onChoose, prizeAmounts, drawSchedule, latestDraws, serve
             <p className="mt-1 text-3xl font-black text-slate-950">
               {tier.amount} <span className="text-base font-bold text-slate-500">{t.birr}</span>
             </p>
+            <DrawResults round={activeRounds[tier.amount]} legacyDraw={latestDraws[tier.amount]} t={t} />
             <DrawTimeInfo
               drawAt={drawSchedule[tier.amount]}
-              draw={latestDraws[tier.amount]}
               now={now}
               language={language}
               t={t}
@@ -543,7 +567,37 @@ function PrizeValue({ label, value, color, currency }) {
   return <div><span className={`block text-[10px] font-black uppercase ${color}`}>{label}</span><span className="mt-1 block text-xs font-bold text-slate-700">{value || 0} {currency}</span></div>;
 }
 
-function DrawTimeInfo({ drawAt, draw, now, language, t }) {
+function DrawResults({ round, legacyDraw, t }) {
+  const placements = round?.placements || (!round && legacyDraw && !legacyDraw.roundId ? {
+    1: {
+      winnerNumber: legacyDraw.winnerNumber,
+      winnerPhoneLast4: legacyDraw.winnerPhoneLast4 || '',
+    },
+  } : {});
+
+  return (
+    <div className="mt-4 space-y-1.5" aria-label={t.drawPlacements}>
+      {[1, 2, 3].map((placement) => {
+        const winner = placements[String(placement)];
+        const placeLabel = t[{ 1: 'first', 2: 'second', 3: 'third' }[placement]];
+        return (
+          <div key={placement} className="flex items-center justify-between gap-2 border-b border-slate-100 py-1.5 text-left text-xs">
+            <span className="font-bold text-slate-600">{translate(t.placementWinner, { place: placeLabel })}</span>
+            {winner ? (
+              <span className="text-right font-bold text-emerald-700">
+                #{String(winner.winnerNumber).padStart(3, '0')} {winner.winnerPhoneLast4 ? `••••${winner.winnerPhoneLast4}` : t.phoneHidden}
+              </span>
+            ) : (
+              <span className="text-right font-medium text-slate-400">{t.notDrawnYet}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DrawTimeInfo({ drawAt, now, language, t }) {
   const drawTime = drawAt?.toMillis?.();
   const remaining = Number.isFinite(drawTime) ? drawTime - now : null;
   const formatter = new Intl.DateTimeFormat(language === 'am' ? 'am-ET' : 'en-ET', {
@@ -556,13 +610,6 @@ function DrawTimeInfo({ drawAt, draw, now, language, t }) {
     minute: '2-digit',
   });
 
-  if (draw) {
-    return (
-      <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
-        {translate(t.drawWinner, { number: String(draw.winnerNumber).padStart(3, '0') })}
-      </p>
-    );
-  }
   if (remaining === null) {
     return <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">{t.drawNotScheduled}</p>;
   }
@@ -605,8 +652,8 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
         {loading ? <p className="py-8 text-center text-sm text-slate-400">{t.loadingList}</p>
           : active.length === 0 ? <p className="rounded-2xl border border-white/10 p-5 text-sm text-slate-400">{t.noRegistrations}</p>
             : <>
-              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 px-4 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                <span>{t.participant} / {t.ticket}</span>
+              <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] gap-2 px-4 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <span>{t.ticket}</span>
                 <span>{t.mobile}</span>
                 <span>{t.status}</span>
               </div>
@@ -615,9 +662,9 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
                 const countdown = `${String(Math.floor(remaining / 60000)).padStart(2, '0')}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0')}`;
                 return (
                   <div key={item.id} className="rounded-2xl bg-white/5 px-4 py-3">
-                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
-                      <span className="min-w-0"><strong className="mr-2 font-mono text-cyan-300">#{String(item.number).padStart(3, '0')}</strong><span className="font-semibold">{item.fullName || t.confirmed}</span></span>
-                      <span className="break-all text-xs text-slate-300">{item.ownerUid === userId ? item.phone || item.phoneLast4 : `${t.phoneHidden} ····${item.phoneLast4}`}</span>
+                    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-2">
+                      <strong className="whitespace-nowrap font-mono text-cyan-300">#{String(item.number).padStart(3, '0')}</strong>
+                      <span className="whitespace-nowrap text-xs text-slate-300">•••• {item.phoneLast4}</span>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${item.status === 'approved' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-300/15 text-amber-200'}`}>{statusLabels[item.status] || t.reserved}</span>
                     </div>
                     {item.status !== 'approved' && <p className="mt-2 text-right text-[10px] text-slate-400">{t.timeRemaining}: {countdown}</p>}

@@ -10,7 +10,9 @@ service cloud.firestore {
     // ticketBoard/{tier-number}: authenticated reservation details and ticket status.
     // settings/{id}: prize/payment settings and bilingual published announcement.
     // drawSchedule/{tier}: admin-managed draw timestamp.
-    // drawEvents/{id}: immutable server-selected and authenticated-user-readable result.
+    // drawRounds/{tier}: server-managed active round and authenticated-user-readable placements.
+    // drawEvents/{id}: server-selected spin and authenticated-user-readable audit event.
+    // drawHistory/{roundId}: archived round and admin-readable event history.
     // drawLocks/{tier}: server-managed transaction lock.
 
     function isAuthenticated() {
@@ -193,9 +195,24 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /drawRounds/{tier} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
     match /drawEvents/{eventId} {
       allow read: if isAuthenticated();
       allow write: if false;
+    }
+
+    match /drawHistory/{roundId} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /events/{eventId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
     }
 
     match /drawLocks/{tier} {

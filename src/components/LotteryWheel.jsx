@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { translations, translate } from '../translations';
 import { isEligibleDrawTicket, MAX_TICKET_NUMBER } from '../../lib/ticket-constants';
@@ -26,7 +26,9 @@ export default function LotteryWheel({ language }) {
   const participantsRef = useRef([]);
   const drawEventRef = useRef(null);
   const lastDrawIdRef = useRef(null);
-  const firstDrawSnapshotRef = useRef(true);
+  const activeRoundRef = useRef(null);
+  const legacyDrawRef = useRef(null);
+  const roundSnapshotLoadedRef = useRef(false);
   const rotationDegreeRef = useRef(0);
   const animationTimerRef = useRef(null);
 
@@ -42,7 +44,9 @@ export default function LotteryWheel({ language }) {
     setDrawEvent(null);
     drawEventRef.current = null;
     lastDrawIdRef.current = null;
-    firstDrawSnapshotRef.current = true;
+    activeRoundRef.current = null;
+    legacyDrawRef.current = null;
+    roundSnapshotLoadedRef.current = false;
     rotationDegreeRef.current = 0;
     setRotationDegree(0);
     setIsSpinning(false);
@@ -82,13 +86,7 @@ export default function LotteryWheel({ language }) {
       orderBy('createdAt', 'desc'),
       limit(1),
     );
-    const unsubscribeDraws = onSnapshot(latestDrawQuery, (snapshot) => {
-      const latestSnapshot = snapshot.docs[0];
-      const latestDraw = latestSnapshot
-        ? { id: latestSnapshot.id, ...latestSnapshot.data() }
-        : null;
-      const isInitialSnapshot = firstDrawSnapshotRef.current;
-      firstDrawSnapshotRef.current = false;
+    const showDraw = (latestDraw, isInitialSnapshot) => {
       drawLoaded = true;
       if (participantsLoaded) setLoading(false);
 
@@ -122,6 +120,7 @@ export default function LotteryWheel({ language }) {
         number: Number(latestDraw.winnerNumber),
         tier: Number(latestDraw.tier),
         phoneLast4: latestDraw.winnerPhoneLast4,
+        placement: Number(latestDraw.placement) || Number(latestDraw.replacedPlacement),
       };
       const winningIndex = frozenNumbers.indexOf(nextWinner.number);
 
@@ -149,8 +148,73 @@ export default function LotteryWheel({ language }) {
         setWinner(nextWinner);
         animationTimerRef.current = null;
       }, 5000);
+    };
+
+    const unsubscribeDraws = onSnapshot(latestDrawQuery, (snapshot) => {
+      const latestSnapshot = snapshot.docs[0];
+      const latestDraw = latestSnapshot
+        ? { id: latestSnapshot.id, ...latestSnapshot.data() }
+        : null;
+      legacyDrawRef.current = latestDraw?.roundId ? null : latestDraw;
+      if (!activeRoundRef.current && roundSnapshotLoadedRef.current) {
+        showDraw(legacyDrawRef.current, lastDrawIdRef.current === null);
+      }
     }, (error) => {
       console.error('Draw event listener error:', {
+        code: error.code,
+        message: error.message,
+      }, error);
+      setLoadError(t.drawEventsLoadError);
+      drawLoaded = true;
+      setLoading(false);
+    });
+    const unsubscribeRound = onSnapshot(doc(db, 'drawRounds', String(selectedTier)), (snapshot) => {
+      const isInitialSnapshot = !roundSnapshotLoadedRef.current;
+      roundSnapshotLoadedRef.current = true;
+      const previousRoundId = activeRoundRef.current?.roundId;
+      const currentRound = snapshot.exists() ? snapshot.data() : null;
+      activeRoundRef.current = currentRound;
+
+      if (!currentRound) {
+        if (legacyDrawRef.current) {
+          showDraw(legacyDrawRef.current, isInitialSnapshot || lastDrawIdRef.current === null);
+        }
+        return;
+      }
+
+      if (previousRoundId && previousRoundId !== currentRound.roundId) {
+        if (animationTimerRef.current) clearTimeout(animationTimerRef.current);
+        animationTimerRef.current = null;
+        lastDrawIdRef.current = null;
+        drawEventRef.current = null;
+        setDrawEvent(null);
+        setWinner(null);
+        setIsSpinning(false);
+        setWheelParticipants(participantsRef.current);
+      }
+
+      if (!currentRound.lastSpin) {
+        if (animationTimerRef.current) clearTimeout(animationTimerRef.current);
+        animationTimerRef.current = null;
+        lastDrawIdRef.current = null;
+        drawEventRef.current = null;
+        setDrawEvent(null);
+        setWinner(null);
+        setIsSpinning(false);
+        setWheelParticipants(participantsRef.current);
+        drawLoaded = true;
+        if (participantsLoaded) setLoading(false);
+        return;
+      }
+
+      showDraw({
+        ...currentRound.lastSpin,
+        id: currentRound.lastSpin.drawEventId,
+        roundId: currentRound.roundId,
+        tier: Number(selectedTier),
+      }, isInitialSnapshot);
+    }, (error) => {
+      console.error('Draw round listener error:', {
         code: error.code,
         message: error.message,
       }, error);
@@ -162,6 +226,7 @@ export default function LotteryWheel({ language }) {
     return () => {
       unsubscribeTickets();
       unsubscribeDraws();
+      unsubscribeRound();
       if (animationTimerRef.current) clearTimeout(animationTimerRef.current);
     };
   }, [selectedTier, t.drawEventsLoadError, t.registeredNumbersLoadError]);
@@ -274,6 +339,13 @@ export default function LotteryWheel({ language }) {
         <div className="mt-6 animate-bounce rounded-2xl border-2 border-amber-400 bg-gradient-to-br from-amber-500/20 to-emerald-500/20 p-5 text-center">
           <span className="mb-1 block text-3xl">🎉</span>
           <h3 className="text-xl font-extrabold uppercase text-amber-300">{t.winnerSelected}</h3>
+          {winner.placement && (
+            <p className="mt-1 text-sm font-bold text-amber-200">
+              {translate(t.placementWinner, {
+                place: t[{ 1: 'first', 2: 'second', 3: 'third' }[winner.placement]],
+              })}
+            </p>
+          )}
           <p className="mt-1 text-2xl font-black text-white">#{String(winner.number).padStart(3, '0')}</p>
           <p className="mt-0.5 font-mono text-sm text-emerald-400">
             {winner.phoneLast4 ? `••••${winner.phoneLast4}` : t.phoneHidden}

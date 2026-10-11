@@ -62,11 +62,19 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
             method: 'POST',
             headers: { Authorization: `Bearer ${idToken}` },
           });
-          if (!response.ok) {
-            throw new Error(`Password-change flag cleanup failed (${response.status}).`);
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || result.cleared !== true) {
+            const flagError = new Error(`Password-change flag cleanup failed (${response.status}).`);
+            flagError.code = 'password-flag-clear-failed';
+            throw flagError;
           }
         } catch (flagError) {
           console.error('Could not clear required password change flag:', flagError);
+          setCurrentPassword('');
+          setNewPassword('');
+          setConfirmation('');
+          setError(t.passwordFlagClearFailed);
+          return;
         }
       }
 

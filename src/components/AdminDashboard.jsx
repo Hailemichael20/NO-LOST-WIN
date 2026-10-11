@@ -17,6 +17,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { formatAddisDateTimeInput, parseAddisDateTimeInput } from '../../lib/draw-schedule';
+import { getNextDrawPlacement } from '../../lib/draw-round';
 
 const TIERS = ['all', 50, 100, 200, 500];
 const STATUSES = ['pending', 'approved', 'rejected'];
@@ -53,10 +54,15 @@ export default function AdminDashboard({ language }) {
   const [drawScheduleLoading, setDrawScheduleLoading] = useState(true);
   const [savingDrawTier, setSavingDrawTier] = useState(null);
   const [latestDraws, setLatestDraws] = useState({});
+  const [activeRounds, setActiveRounds] = useState({});
   const [drawEventsLoading, setDrawEventsLoading] = useState(true);
   const [drawEventsError, setDrawEventsError] = useState('');
+  const [drawRoundsLoading, setDrawRoundsLoading] = useState(true);
+  const [drawRoundsError, setDrawRoundsError] = useState('');
   const [spinTier, setSpinTier] = useState(null);
   const [redrawReasons, setRedrawReasons] = useState({});
+  const [redrawPlacements, setRedrawPlacements] = useState({});
+  const [startingRoundTier, setStartingRoundTier] = useState(null);
   const [now, setNow] = useState(Date.now());
   const visibleEntries = entries
     .map((entry) => ({ ...privateEntries[entry.id], ...entry }))
@@ -190,6 +196,29 @@ export default function AdminDashboard({ language }) {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [t.drawEventsLoadError]);
 
+  useEffect(() => {
+    const loadedTiers = new Set();
+    const unsubscribers = PRIZE_TIERS.map((tier) => onSnapshot(
+      doc(db, 'drawRounds', String(tier)),
+      (snapshot) => {
+        setActiveRounds((current) => ({
+          ...current,
+          [tier]: snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null,
+        }));
+        loadedTiers.add(tier);
+        if (loadedTiers.size === PRIZE_TIERS.length) setDrawRoundsLoading(false);
+        setDrawRoundsError('');
+      },
+      (error) => {
+        console.error('Active draw round listener error:', error);
+        loadedTiers.add(tier);
+        if (loadedTiers.size === PRIZE_TIERS.length) setDrawRoundsLoading(false);
+        setDrawRoundsError(t.drawRoundsLoadError);
+      },
+    ));
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [t.drawRoundsLoadError]);
+
   const updatePrize = (tier, place, value) => {
     setPrizeAmounts((current) => ({
       ...current,
@@ -292,6 +321,7 @@ export default function AdminDashboard({ language }) {
         body: JSON.stringify({
           tier,
           redrawReason: redrawReasons[tier] || '',
+          replacedPlacement: redrawPlacements[tier] || '',
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -300,14 +330,22 @@ export default function AdminDashboard({ language }) {
           DRAW_NOT_SCHEDULED: t.drawScheduleRequiredError,
           DRAW_TIME_NOT_REACHED: t.drawTimeNotReachedError,
           REDRAW_REASON_REQUIRED: t.redrawReasonRequiredError,
+          REDRAW_PLACEMENT_REQUIRED: t.redrawPlacementRequiredError,
+          START_NEW_ROUND_REQUIRED: t.startNewRoundRequiredError,
+          ROUND_ARCHIVING: t.roundArchivingError,
           NO_APPROVED_TICKETS: t.noConfirmedTicketsError,
+          NO_ELIGIBLE_TICKETS: t.noEligibleTicketsError,
           DUPLICATE_APPROVED_TICKETS: t.duplicateConfirmedTicketsError,
         };
         setDrawScheduleMessage(errorMessages[result.code] || t.drawFailed);
         return;
       }
-      setDrawScheduleMessage(translate(t.drawCompleted, {
+      const placeLabel = t[{ 1: 'first', 2: 'second', 3: 'third' }[
+        result.redraw ? result.replacedPlacement : result.placement
+      ]];
+      setDrawScheduleMessage(translate(result.redraw ? t.redrawCompleted : t.drawCompleted, {
         tier: `${tier} ${t.birr}`,
+        place: placeLabel,
         number: String(result.winnerNumber).padStart(3, '0'),
       }));
       setRedrawReasons((current) => ({ ...current, [tier]: '' }));
@@ -316,6 +354,40 @@ export default function AdminDashboard({ language }) {
       setDrawScheduleMessage(t.drawFailed);
     } finally {
       setSpinTier(null);
+    }
+  };
+
+  const startNewDrawRound = async (tier) => {
+    setStartingRoundTier(tier);
+    setDrawScheduleMessage('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${apiBaseUrl}/api/start-draw-round`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tier }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorMessages = {
+          ROUND_NOT_COMPLETE: t.roundNotCompleteError,
+          NO_ROUND_TO_ARCHIVE: t.noRoundToArchiveError,
+          ROUND_ARCHIVING: t.roundArchivingError,
+        };
+        setDrawScheduleMessage(errorMessages[result.code] || t.startRoundFailed);
+        return;
+      }
+      setDrawScheduleMessage(translate(t.roundStarted, { tier: `${tier} ${t.birr}` }));
+      setRedrawReasons((current) => ({ ...current, [tier]: '' }));
+      setRedrawPlacements((current) => ({ ...current, [tier]: '' }));
+    } catch (error) {
+      console.error('Start draw round request error:', error);
+      setDrawScheduleMessage(t.startRoundFailed);
+    } finally {
+      setStartingRoundTier(null);
     }
   };
 
@@ -424,21 +496,38 @@ export default function AdminDashboard({ language }) {
         </div>
         {drawScheduleError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{drawScheduleError}</p>}
         {drawEventsError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{drawEventsError}</p>}
+        {drawRoundsError && <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{drawRoundsError}</p>}
         <div className="grid gap-4 sm:grid-cols-2">
           {PRIZE_TIERS.map((tier) => {
             const schedule = drawSchedule[tier];
             const latestDraw = latestDraws[tier];
+            const activeRound = activeRounds[tier];
+            const isLegacyDraw = !activeRound && latestDraw && !latestDraw.roundId;
+            const placements = activeRound?.placements || (isLegacyDraw ? {
+              1: {
+                drawEventId: latestDraw.id,
+                placement: 1,
+                winnerNumber: latestDraw.winnerNumber,
+                winnerPhoneLast4: latestDraw.winnerPhoneLast4 || '',
+              },
+            } : {});
+            const nextPlacement = getNextDrawPlacement(placements);
+            const isRoundComplete = Boolean(activeRound && nextPlacement === null);
             const redrawReason = redrawReasons[tier] || '';
             const drawIsReached = schedule?.drawAt?.toMillis?.() <= Date.now();
             const drawButtonDisabled = drawScheduleLoading
+              || drawRoundsLoading
               || Boolean(drawScheduleError)
+              || Boolean(drawRoundsError)
               || drawEventsLoading
               || Boolean(drawEventsError)
               || spinTier !== null
+              || startingRoundTier !== null
               || savingDrawTier !== null
+              || isLegacyDraw
               || !schedule?.drawAt
               || !drawIsReached
-              || (latestDraw && redrawReason.trim().length < 10);
+              || (isRoundComplete && (redrawReason.trim().length < 10 || !redrawPlacements[tier]));
 
             return (
               <form
@@ -474,16 +563,54 @@ export default function AdminDashboard({ language }) {
                     onClick={() => spinDraw(tier)}
                     className="min-h-10 flex-1 rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {spinTier === tier ? t.spinningWheel : latestDraw ? t.redraw : t.spin}
+                    {spinTier === tier
+                      ? t.spinningWheel
+                      : isRoundComplete
+                        ? t.redraw
+                        : translate(t.spinForPlace, {
+                          place: t[{ 1: 'first', 2: 'second', 3: 'third' }[nextPlacement || 1]],
+                        })}
                   </button>
                 </div>
-                {latestDraw && (
+                <div className="mt-3 space-y-2" aria-label={t.drawPlacements}>
+                  {[1, 2, 3].map((placement) => {
+                    const winner = placements[String(placement)];
+                    const placeLabel = t[{ 1: 'first', 2: 'second', 3: 'third' }[placement]];
+                    return (
+                      <div key={placement} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs">
+                        <span className="font-bold text-gray-700">{translate(t.placementWinner, { place: placeLabel })}</span>
+                        {winner ? (
+                          <span className="text-right font-semibold text-emerald-700">
+                            #{String(winner.winnerNumber).padStart(3, '0')} {winner.winnerPhoneLast4 ? `••••${winner.winnerPhoneLast4}` : t.phoneHidden}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">{t.notDrawnYet}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {isRoundComplete && (
                   <>
-                    <p className="mt-3 text-xs font-semibold text-emerald-700">
-                      {translate(t.previousDrawWinner, {
-                        number: String(latestDraw.winnerNumber).padStart(3, '0'),
-                      })}
-                    </p>
+                    <label className="mt-3 block text-xs font-bold text-gray-600">
+                      {t.redrawPlacement}
+                      <select
+                        required
+                        value={redrawPlacements[tier] || ''}
+                        onChange={(event) => setRedrawPlacements((current) => ({
+                          ...current,
+                          [tier]: event.target.value,
+                        }))}
+                        className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900"
+                      >
+                        <option value="">{t.choosePlacement}</option>
+                        {[1, 2, 3].map((placement) => (
+                          <option key={placement} value={placement}>
+                            {t[{ 1: 'first', 2: 'second', 3: 'third' }[placement]]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                     <label className="mt-3 block text-xs font-bold text-gray-600">
                       {t.redrawReason}
                       <textarea
@@ -499,6 +626,16 @@ export default function AdminDashboard({ language }) {
                       />
                     </label>
                   </>
+                )}
+                {(isRoundComplete || isLegacyDraw) && (
+                  <button
+                    type="button"
+                    disabled={drawRoundsLoading || Boolean(drawRoundsError) || spinTier !== null || startingRoundTier !== null}
+                    onClick={() => startNewDrawRound(tier)}
+                    className="mt-3 min-h-10 w-full rounded-lg border border-emerald-700 bg-white px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                  >
+                    {startingRoundTier === tier ? t.startingNewRound : t.startNewDrawRound}
+                  </button>
                 )}
               </form>
             );

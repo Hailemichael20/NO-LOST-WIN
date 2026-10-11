@@ -130,6 +130,14 @@
         { "fieldPath": "tier", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "drawEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tier", "order": "ASCENDING" },
+        { "fieldPath": "roundId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
