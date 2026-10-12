@@ -29,7 +29,7 @@ export default async function handler(request, response) {
     const userRef = getFirestore(app).collection('users').doc(token.uid);
     const db = getFirestore(app);
     let result = 'password-not-changed';
-    for (const delayMs of PASSWORD_UPDATE_CHECK_DELAYS_MS) {
+    for (const [attempt, delayMs] of PASSWORD_UPDATE_CHECK_DELAYS_MS.entries()) {
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
