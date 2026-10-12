@@ -175,9 +175,12 @@ export default function LotteryWheel({ language }) {
       const currentRound = snapshot.exists() ? snapshot.data() : null;
       activeRoundRef.current = currentRound;
 
-      if (!currentRound) {
+            if (!currentRound) {
         if (legacyDrawRef.current) {
           showDraw(legacyDrawRef.current, isInitialSnapshot || lastDrawIdRef.current === null);
+        } else {
+          drawLoaded = true;
+          if (participantsLoaded) setLoading(false);
         }
         return;
       }
