@@ -82,10 +82,14 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
       setCurrentPassword('');
       setNewPassword('');
       setConfirmation('');
-      setNotice(t.passwordChanged);
-      redirectTimer.current = window.setTimeout(() => {
+      if (mustChangePassword) {
         navigate('/draw', { replace: true });
-      }, 1200);
+      } else {
+        setNotice(t.passwordChanged);
+        redirectTimer.current = window.setTimeout(() => {
+          navigate('/draw', { replace: true });
+        }, 1200);
+      }
     } catch (changeError) {
       console.error('Password change error:', changeError);
       const errorKey = passwordChangeErrorKey(changeError.code);

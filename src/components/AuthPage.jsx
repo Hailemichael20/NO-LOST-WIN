@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { auth, db } from '../firebaseConfig';
 import {
   createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   updateProfile,
 } from 'firebase/auth';
@@ -28,9 +27,7 @@ export default function AuthPage({ language, setLanguage }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [recoveryEmail, setRecoveryEmail] = useState('');
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [recoveryChoice, setRecoveryChoice] = useState('email');
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [adminContact, setAdminContact] = useState({ phone: '+251930851916', telegram: '@ethiodraw' });
   const [error, setError] = useState('');
@@ -98,34 +95,6 @@ export default function AuthPage({ language, setLanguage }) {
     }
   };
 
-  const handleReset = async (event) => {
-    event.preventDefault();
-    if (!recoveryEmail) {
-      setError(t.errorResetEmpty);
-      return;
-    }
-
-    setBusy(true);
-    setError('');
-    try {
-      await sendPasswordResetEmail(auth, recoveryEmail);
-      try {
-        await notifyAdminOfPasswordRequest(recoveryEmail.trim());
-      } catch (notificationError) {
-        console.error('Password reset notification error:', notificationError);
-        setError(t.resetNotificationFailed);
-        setShowRecoveryModal(false);
-        return;
-      }
-      setMessage(t.successReset);
-      setShowRecoveryModal(false);
-    } catch (authError) {
-      setError(t.errorResetFailed);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleAdminResetRequest = async (event) => {
     event.preventDefault();
     if (!resetIdentifier.trim()) {
@@ -179,12 +148,9 @@ export default function AuthPage({ language, setLanguage }) {
       </form>
 
       {mode === 'login' && (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <button type="button" onClick={() => { setError(''); setRecoveryChoice('email'); setShowRecoveryModal(true); }} className="pill-button w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">
+        <div className="mt-5">
+          <button type="button" onClick={() => { setError(''); setShowRecoveryModal(true); }} className="pill-button w-full py-3 text-sm font-bold text-cyan-700 hover:bg-cyan-50">
             {t.forgotPassword}
-          </button>
-          <button type="button" onClick={() => { setError(''); setRecoveryChoice('admin'); setShowRecoveryModal(true); }} className="pill-button w-full py-3 text-sm font-bold text-slate-700 hover:bg-slate-100">
-            {t.changePasswordLink}
           </button>
         </div>
       )}
@@ -197,35 +163,17 @@ export default function AuthPage({ language, setLanguage }) {
               <button type="button" onClick={() => setShowRecoveryModal(false)} className="text-sm font-bold text-slate-500">✕</button>
             </div>
 
-            <div className="mb-5 grid gap-2 sm:grid-cols-2">
-              <button type="button" onClick={() => setRecoveryChoice('email')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'email' ? 'bg-cyan-600 !text-white' : 'bg-slate-100 !text-slate-700'}`}>
-                {t.recoverEmail}
+            <form onSubmit={handleAdminResetRequest} className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <p className="font-bold text-slate-900">{t.adminContact}</p>
+                <p className="mt-1">{adminContact.phone}</p>
+                <p className="mt-1">{t.telegramLabel}: {adminContact.telegram}</p>
+              </div>
+              <Field label={t.loginIdentifier} type="text" value={resetIdentifier} onChange={setResetIdentifier} placeholder={t.resetIdentifierHint} />
+              <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-amber-500 to-orange-600 py-3.5 text-sm font-bold !text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
+                {busy ? t.wait : t.requestReset}
               </button>
-              <button type="button" onClick={() => setRecoveryChoice('admin')} className={`rounded-xl px-3 py-2 text-sm font-bold ${recoveryChoice === 'admin' ? 'bg-cyan-600 !text-white' : 'bg-slate-100 !text-slate-700'}`}>
-                {t.contactAdmin}
-              </button>
-            </div>
-
-            {recoveryChoice === 'email' ? (
-              <form onSubmit={handleReset} className="space-y-4">
-                <Field label={t.recoveryEmail} type="email" value={recoveryEmail} onChange={setRecoveryEmail} placeholder={t.placeholderEmail} />
-                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-cyan-500 to-blue-600 py-3.5 text-sm font-bold !text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
-                  {busy ? t.wait : t.recoveryButton}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleAdminResetRequest} className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                  <p className="font-bold text-slate-900">{t.adminContact}</p>
-                  <p className="mt-1">{adminContact.phone}</p>
-                  <p className="mt-1">{t.telegramLabel}: {adminContact.telegram}</p>
-                </div>
-                <Field label={t.loginIdentifier} type="text" value={resetIdentifier} onChange={setResetIdentifier} placeholder={t.resetIdentifierHint} />
-                <button disabled={busy} className="pill-button w-full bg-gradient-to-r from-amber-500 to-orange-600 py-3.5 text-sm font-bold !text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-50">
-                  {busy ? t.wait : t.requestReset}
-                </button>
-              </form>
-            )}
+            </form>
           </div>
         </div>
       )}
