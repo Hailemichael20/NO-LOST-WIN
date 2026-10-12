@@ -46,8 +46,7 @@ export default async function handler(request, response) {
           : userData?.passwordChangeRequiredAt
             ? 'users.passwordChangeRequiredAt (Firestore Timestamp)'
             : 'missing';
-        const passwordChangedTime = userRecord.metadata.passwordUpdatedAt || null;
-
+        const passwordChangedTime = userRecord.tokensValidAfterTime || null;
         console.log('Password reset timestamp comparison:', {
           uid: token.uid,
           attempt: attempt + 1,
