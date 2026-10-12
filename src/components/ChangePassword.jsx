@@ -57,7 +57,7 @@ export default function ChangePassword({ user, mustChangePassword, onPasswordCha
 
       if (mustChangePassword) {
         try {
-          const idToken = await user.getIdToken();
+          const idToken = await user.getIdToken(true);
           const response = await fetch(`${apiBaseUrl}/api/clear-password-change-flag`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${idToken}` },

@@ -1,7 +1,7 @@
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
-import { getPasswordChangeRequirementStatus } from '../lib/password-change-required.js';
+import { getPasswordChangeRequirementStatus, toEpochMillis } from '../lib/password-change-required.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
 
 const PASSWORD_UPDATE_CHECK_DELAYS_MS = [0, 250, 500, 1000];
@@ -38,9 +38,32 @@ export default async function handler(request, response) {
       result = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(userRef);
         const userData = snapshot.exists ? snapshot.data() : null;
+        const adminResetTime = userData?.passwordChangeRequiredPasswordUpdatedAt
+          || userData?.passwordChangeRequiredAt
+          || null;
+        const adminResetTimeSource = userData?.passwordChangeRequiredPasswordUpdatedAt
+          ? 'users.passwordChangeRequiredPasswordUpdatedAt (Firebase Auth ISO timestamp)'
+          : userData?.passwordChangeRequiredAt
+            ? 'users.passwordChangeRequiredAt (Firestore Timestamp)'
+            : 'missing';
+        const passwordChangedTime = userRecord.metadata.passwordUpdatedAt || null;
+
+        console.log('Password reset timestamp comparison:', {
+          uid: token.uid,
+          attempt: attempt + 1,
+          adminResetTime,
+          adminResetTimeMillis: toEpochMillis(adminResetTime),
+          adminResetTimeUnit: 'milliseconds since Unix epoch',
+          adminResetTimeSource,
+          passwordChangedTime,
+          passwordChangedTimeMillis: toEpochMillis(passwordChangedTime),
+          passwordChangedTimeUnit: 'milliseconds since Unix epoch',
+          passwordChangedTimeSource: 'Firebase Admin Auth userRecord.metadata.passwordUpdatedAt (ISO timestamp)',
+        });
+
         const status = getPasswordChangeRequirementStatus(
           userData,
-          userRecord.metadata.passwordUpdatedAt,
+          passwordChangedTime,
         );
 
         if (status !== 'cleared' || !userData?.mustChangePassword) {
