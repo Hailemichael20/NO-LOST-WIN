@@ -1,8 +1,10 @@
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
-import { hasPasswordChangedSinceRequirement } from '../lib/password-change-required.js';
+import { getPasswordChangeRequirementStatus } from '../lib/password-change-required.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
+
+const PASSWORD_UPDATE_CHECK_DELAYS_MS = [0, 250, 500, 1000];
 
 export default async function handler(request, response) {
   if (!applyCors(request, response)) return;
@@ -25,34 +27,36 @@ export default async function handler(request, response) {
     }
 
     const userRef = getFirestore(app).collection('users').doc(token.uid);
-    const userRecord = await adminAuth.getUser(token.uid);
-    const result = await getFirestore(app).runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(userRef);
-      if (!snapshot.exists || snapshot.data()?.mustChangePassword !== true) {
+    const db = getFirestore(app);
+    let result = 'password-not-changed';
+    for (const delayMs of PASSWORD_UPDATE_CHECK_DELAYS_MS) {
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      const userRecord = await adminAuth.getUser(token.uid);
+      result = await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(userRef);
+        const userData = snapshot.exists ? snapshot.data() : null;
+        const status = getPasswordChangeRequirementStatus(
+          userData,
+          userRecord.metadata.passwordUpdatedAt,
+        );
+
+        if (status !== 'cleared' || !userData?.mustChangePassword) {
+          return status;
+        }
+
+        transaction.update(userRef, {
+          mustChangePassword: false,
+          passwordChangeRequiredAt: FieldValue.delete(),
+          passwordChangeRequiredPasswordUpdatedAt: FieldValue.delete(),
+        });
         return 'cleared';
-      }
-
-      const userData = snapshot.data();
-      const passwordRequirementBaseline = userData.passwordChangeRequiredPasswordUpdatedAt
-        || userData.passwordChangeRequiredAt;
-      if (!passwordRequirementBaseline) {
-        return 'missing-requirement-time';
-      }
-
-      if (!hasPasswordChangedSinceRequirement(
-        userRecord.metadata.passwordUpdatedAt,
-        passwordRequirementBaseline,
-      )) {
-        return 'password-not-changed';
-      }
-
-      transaction.update(userRef, {
-        mustChangePassword: false,
-        passwordChangeRequiredAt: FieldValue.delete(),
-        passwordChangeRequiredPasswordUpdatedAt: FieldValue.delete(),
       });
-      return 'cleared';
-    });
+
+      if (result !== 'password-not-changed') break;
+    }
 
     if (result !== 'cleared') {
       return response.status(409).json({
