@@ -20,7 +20,7 @@ To change payment details for all devices without rebuilding the app, sign in as
 
 The language selector is shared across the application and remembers the selected language on each device. App pages, status messages, the administrator dashboard, and the lottery wheel provide English and Amharic text.
 
-Ticket numbers `#001`–`#500` are reserved independently for each entry category. A selection is held for six hours from the time it is made, giving admins six hours to review the registration. The registered list shows only approved (confirmed) receipt entries; active and pending reservations are used only to prevent number collisions. Existing records above `#500` are retained but excluded from new draws.
+Ticket numbers `#001`–`#100` are reserved independently for each entry category. A selection is held for six hours from the time it is made, giving admins six hours to review the registration. The registered list shows only approved (confirmed) receipt entries; active and pending reservations are used only to prevent number collisions. Existing records above `#100` are retained but excluded from new draws.
 
 The `entries` collection is the canonical source for each ticket's numeric category (`tier`), number, and review status (`pending`, `approved`, or `rejected`). The user list, wheel, admin receipt table, and draw endpoint all use that record. `entryPrivate/{entryId}` stores the receipt URL and personal details and can only be read by admins. Signed-in users can read approved entries; keep `entries` limited to public ticket fields and continue writing private details only to `entryPrivate`.
 
