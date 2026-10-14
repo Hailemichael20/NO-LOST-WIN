@@ -13,12 +13,6 @@ function resetError(statusCode, code, message) {
   return error;
 }
 
-// Resets ONE draw category (tier) back to a fresh start:
-//  - deletes the winners and draw history events of the active round
-//  - starts a new, empty draw round and clears the scheduled draw time so admin can set a new one
-//  - deletes the confirmed (approved) entries and unlocks their ticket numbers
-// Pending, awaiting-payment and rejected entries are NOT touched.
-// Wallet balances and wallet transactions are NOT touched.
 export default async function handler(request, response) {
   if (!applyCors(request, response)) return;
   if (request.method === 'OPTIONS') return response.status(204).end();
@@ -45,7 +39,6 @@ export default async function handler(request, response) {
     const roundRef = db.collection('drawRounds').doc(String(tier));
     const lockRef = db.collection('drawLocks').doc(String(tier));
 
-    // Block the reset while a spin/archive is in progress for this category.
     const lockSnapshot = await lockRef.get();
     if (lockSnapshot.exists && lockSnapshot.data()?.archiving === true) {
       throw resetError(409, 'ROUND_ARCHIVING', 'This category is busy archiving its round. Try again in a moment.');
@@ -59,7 +52,6 @@ export default async function handler(request, response) {
       db.collection('ticketBoard').where('tier', '==', String(tier)).where('status', '==', 'approved').get(),
     ]);
 
-    // Ticket ids to unlock: from approved entries, plus any approved reservation/board docs.
     const ticketIds = new Set();
     approvedEntriesSnapshot.docs.forEach((entryDoc) => {
       const ticketReservationId = entryDoc.data().ticketReservationId;
@@ -79,10 +71,8 @@ export default async function handler(request, response) {
       return false;
     });
 
-    // 1. Winners and draw events.
     eventsSnapshot.docs.forEach((eventDoc) => writer.delete(eventDoc.ref));
 
-    // 2. Approved entries (public + private) and their locked ticket numbers.
     approvedEntriesSnapshot.docs.forEach((entryDoc) => {
       writer.delete(entryDoc.ref);
       writer.delete(db.collection('entryPrivate').doc(entryDoc.id));
@@ -92,14 +82,13 @@ export default async function handler(request, response) {
       writer.delete(db.collection('ticketBoard').doc(ticketId));
     });
 
-    // 3. Fresh, empty round, unlocked draw lock, and cleared schedule so admin can set a new one.
+    // 3. Fresh, empty round with NO drawTime field so it shows as "Not scheduled"
     writer.set(roundRef, {
       tier,
       roundId: nextRoundId,
       placements: {},
       usedWinnerNumbers: [],
       lastSpin: null,
-      drawTime: null, // Clears the scheduled draw time so it can be refilled from the admin side
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
@@ -110,7 +99,6 @@ export default async function handler(request, response) {
       updatedAt: FieldValue.serverTimestamp(),
     });
 
-    // 4. Small audit record (server-only collection).
     writer.create(db.collection('adminLogs').doc(), {
       type: 'reset_draw_category',
       tier,
