@@ -35,9 +35,11 @@ export default async function handler(request, response) {
       return response.status(400).json({ code: 'INVALID_CATEGORY', error: 'A valid draw category is required.' });
     }
 
+    const tierCode = String(tier);
     const db = getFirestore(app);
-    const roundRef = db.collection('drawRounds').doc(String(tier));
-    const lockRef = db.collection('drawLocks').doc(String(tier));
+    const roundRef = db.collection('drawRounds').doc(tierCode);
+    const scheduleRef = db.collection('drawSchedule').doc(tierCode); // Crucial for clearing draw time reached
+    const lockRef = db.collection('drawLocks').doc(tierCode);
 
     const lockSnapshot = await lockRef.get();
     if (lockSnapshot.exists && lockSnapshot.data()?.archiving === true) {
@@ -48,8 +50,8 @@ export default async function handler(request, response) {
       roundRef.get(),
       db.collection('drawEvents').where('tier', '==', tier).get(),
       db.collection('entries').where('tier', '==', tier).where('status', '==', 'approved').get(),
-      db.collection('ticketReservations').where('tier', '==', String(tier)).where('status', '==', 'approved').get(),
-      db.collection('ticketBoard').where('tier', '==', String(tier)).where('status', '==', 'approved').get(),
+      db.collection('ticketReservations').where('tier', '==', tierCode).where('status', '==', 'approved').get(),
+      db.collection('ticketBoard').where('tier', '==', tierCode).where('status', '==', 'approved').get(),
     ]);
 
     const ticketIds = new Set();
@@ -71,6 +73,9 @@ export default async function handler(request, response) {
       return false;
     });
 
+    // Delete schedule so "Draw time reached" goes away
+    writer.delete(scheduleRef);
+
     eventsSnapshot.docs.forEach((eventDoc) => writer.delete(eventDoc.ref));
 
     approvedEntriesSnapshot.docs.forEach((entryDoc) => {
@@ -82,7 +87,6 @@ export default async function handler(request, response) {
       writer.delete(db.collection('ticketBoard').doc(ticketId));
     });
 
-    // 3. Fresh, empty round with NO drawTime field so it shows as "Not scheduled"
     writer.set(roundRef, {
       tier,
       roundId: nextRoundId,
