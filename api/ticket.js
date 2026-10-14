@@ -2,9 +2,11 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
-import { isValidTicketNumber, RESERVATION_DURATION_MS } from '../lib/ticket-constants.js';
+import { isValidTicketNumber } from '../lib/ticket-constants.js';
 
 const VALID_TIERS = [50, 100, 200, 500];
+// Short 2-minute temporary window just to let them pick file & upload receipt
+const SHORT_RESERVATION_MS = 2 * 60 * 1000;
 
 export default async function handler(request, response) {
   if (!applyCors(request, response)) return;
@@ -13,19 +15,16 @@ export default async function handler(request, response) {
 
   const url = request.url || '';
 
-  // Route 1: Reserve Ticket
   if (url.includes('reserve-ticket')) {
     return handleReserve(request, response);
-  }
-  // Route 2: Submit Receipt
-  else if (url.includes('submit-receipt')) {
+  } else if (url.includes('submit-receipt')) {
     return handleSubmit(request, response);
   }
 
   return response.status(404).json({ error: 'Endpoint not found.' });
 }
 
-// --- Reservation Logic ---
+// --- Short Temporary Hold (2 Minutes Max) ---
 async function handleReserve(request, response) {
   try {
     const authorization = request.headers.authorization || '';
@@ -57,7 +56,7 @@ async function handleReserve(request, response) {
       .limit(1);
 
     const now = Date.now();
-    const expiresAt = Timestamp.fromMillis(now + RESERVATION_DURATION_MS);
+    const expiresAt = Timestamp.fromMillis(now + SHORT_RESERVATION_MS);
 
     await db.runTransaction(async (transaction) => {
       const [reservationSnapshot, boardSnapshot, confirmedEntrySnapshot] = await Promise.all([
@@ -66,14 +65,14 @@ async function handleReserve(request, response) {
         transaction.get(confirmedEntryQuery),
       ]);
 
-      const isStillHeld = (snapshot) => {
+      const isTaken = (snapshot) => {
         if (!snapshot.exists) return false;
         const existing = snapshot.data();
-        return existing.status === 'approved' || existing.expiresAt?.toMillis() > now;
+        return existing.status === 'approved' || (existing.status === 'pending' && existing.expiresAt?.toMillis() > now) || (existing.status === 'reserved' && existing.expiresAt?.toMillis() > now);
       };
 
-      if (confirmedEntrySnapshot.size > 0 || isStillHeld(reservationSnapshot) || isStillHeld(boardSnapshot)) {
-        const error = new Error('Ticket number is already reserved.');
+      if (confirmedEntrySnapshot.size > 0 || isTaken(reservationSnapshot) || isTaken(boardSnapshot)) {
+        const error = new Error('Ticket number is already reserved or purchased.');
         error.code = 'TICKET_TAKEN';
         throw error;
       }
@@ -88,6 +87,7 @@ async function handleReserve(request, response) {
         reservedAt: FieldValue.serverTimestamp(),
         expiresAt,
       };
+
       transaction.set(reservationRef, reservationData);
       transaction.set(boardRef, {
         ownerUid: user.uid,
@@ -112,11 +112,11 @@ async function handleReserve(request, response) {
       return response.status(409).json({ code: error.code, error: error.message });
     }
     console.error('Ticket reservation error:', error);
-    return response.status(400).json({ error: 'Could not reserve this ticket.' });
+    return response.status(400).json({ error: 'Could not select this ticket.' });
   }
 }
 
-// --- Receipt Submission Logic ---
+// --- Submit Receipt & Lock Ticket ---
 async function handleSubmit(request, response) {
   try {
     const authorization = request.headers.authorization || '';
@@ -147,14 +147,8 @@ async function handleSubmit(request, response) {
 
       const reservation = reservationSnapshot.data();
       if (reservation.ownerUid !== user.uid) {
-        const error = new Error('Unauthorized reservation access.');
+        const error = new Error('Unauthorized access to this ticket.');
         error.code = 'UNAUTHORIZED';
-        throw error;
-      }
-
-      if (reservation.expiresAt?.toMillis() <= Date.now() && reservation.status !== 'approved') {
-        const error = new Error('Reservation has expired.');
-        error.code = 'RESERVATION_EXPIRED';
         throw error;
       }
 
@@ -162,6 +156,7 @@ async function handleSubmit(request, response) {
       const entryRef = db.collection('entries').doc();
       entryId = entryRef.id;
 
+      // Create official entry attached to receipt
       transaction.set(entryRef, {
         tier: tierNumber,
         number: reservation.number,
@@ -183,6 +178,7 @@ async function handleSubmit(request, response) {
 
       transaction.update(reservationRef, {
         status: 'pending',
+        receiptUrl,
         updatedAt: FieldValue.serverTimestamp(),
       });
 
