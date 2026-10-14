@@ -63,6 +63,7 @@ export default function AdminDashboard({ language }) {
   const [redrawReasons, setRedrawReasons] = useState({});
   const [redrawPlacements, setRedrawPlacements] = useState({});
   const [startingRoundTier, setStartingRoundTier] = useState(null);
+  const [resettingTier, setResettingTier] = useState(null);
   const [now, setNow] = useState(Date.now());
   const visibleEntries = entries
     .map((entry) => ({ ...privateEntries[entry.id], ...entry }))
@@ -391,6 +392,36 @@ export default function AdminDashboard({ language }) {
     }
   };
 
+  const resetCategory = async (tier) => {
+    if (!window.confirm(translate(t.resetCategoryConfirm, { tier: `${tier} ${t.birr}` }))) return;
+    setResettingTier(tier);
+    setDrawScheduleMessage('');
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const response = await fetch(`${apiBaseUrl}/api/reset-draw-category`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tier }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setDrawScheduleMessage(result.error || t.resetCategoryFailed);
+        return;
+      }
+      setDrawScheduleMessage(translate(t.resetCategoryDone, { tier: `${tier} ${t.birr}` }));
+      setRedrawReasons((current) => ({ ...current, [tier]: '' }));
+      setRedrawPlacements((current) => ({ ...current, [tier]: '' }));
+    } catch (error) {
+      console.error('Reset category request error:', error);
+      setDrawScheduleMessage(t.resetCategoryFailed);
+    } finally {
+      setResettingTier(null);
+    }
+  };
+
   // 1. Fetch Entries in Real-Time
   useEffect(() => {
     setLoading(true);
@@ -523,6 +554,7 @@ export default function AdminDashboard({ language }) {
               || Boolean(drawEventsError)
               || spinTier !== null
               || startingRoundTier !== null
+              || resettingTier !== null
               || savingDrawTier !== null
               || isLegacyDraw
               || !schedule?.drawAt
@@ -637,6 +669,14 @@ export default function AdminDashboard({ language }) {
                     {startingRoundTier === tier ? t.startingNewRound : t.startNewDrawRound}
                   </button>
                 )}
+                <button
+                  type="button"
+                  disabled={drawRoundsLoading || spinTier !== null || startingRoundTier !== null || resettingTier !== null}
+                  onClick={() => resetCategory(tier)}
+                  className="mt-3 min-h-10 w-full rounded-lg border border-red-600 bg-white px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {resettingTier === tier ? t.resettingCategory : t.resetCategory}
+                </button>
               </form>
             );
           })}

@@ -21,6 +21,7 @@ export default function LotteryWheel({ language }) {
   const [isSpinning, setIsSpinning] = useState(false);
   const [rotationDegree, setRotationDegree] = useState(0);
   const [winner, setWinner] = useState(null);
+  const [revealedPlacements, setRevealedPlacements] = useState(null);
   const [drawEvent, setDrawEvent] = useState(null);
   const canvasRef = useRef(null);
   const participantsRef = useRef([]);
@@ -126,6 +127,7 @@ export default function LotteryWheel({ language }) {
 
       if (isInitialSnapshot || winningIndex < 0 || frozenParticipants.length === 0) {
         setWinner(nextWinner);
+        setRevealedPlacements(activeRoundRef.current?.placements || null);
         if (winningIndex >= 0) {
           const alignedRotation = rotationDegreeRef.current
             + getWheelAlignmentDegrees(winningIndex, frozenNumbers.length, rotationDegreeRef.current);
@@ -146,6 +148,7 @@ export default function LotteryWheel({ language }) {
       animationTimerRef.current = setTimeout(() => {
         setIsSpinning(false);
         setWinner(nextWinner);
+        setRevealedPlacements(activeRoundRef.current?.placements || null);
         animationTimerRef.current = null;
       }, 5000);
     };
@@ -235,6 +238,10 @@ export default function LotteryWheel({ language }) {
   }, [selectedTier, t.drawEventsLoadError, t.registeredNumbersLoadError]);
 
   useEffect(() => {
+    if (!winner) setRevealedPlacements(null);
+  }, [winner]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || wheelParticipants.length === 0) return;
 
@@ -278,6 +285,11 @@ export default function LotteryWheel({ language }) {
     context.strokeStyle = '#FFFFFF';
     context.stroke();
   }, [wheelParticipants]);
+
+  const allThreeWinnersReady = Boolean(
+    revealedPlacements
+    && ['1', '2', '3'].every((place) => revealedPlacements[place]),
+  );
 
   return (
     <div className="mx-auto my-8 max-w-xl rounded-3xl border border-slate-800 bg-slate-900 p-6 text-white shadow-2xl">
@@ -338,7 +350,36 @@ export default function LotteryWheel({ language }) {
         <p className="mt-5 text-center text-sm font-semibold text-slate-400">{t.waitingForDraw}</p>
       )}
 
-      {winner && (
+      {winner && allThreeWinnersReady && (
+        <div className="mt-6 rounded-2xl border-2 border-amber-400 bg-gradient-to-br from-amber-500/20 to-emerald-500/20 p-5 text-center">
+          <span className="mb-1 block text-3xl">🎉</span>
+          <h3 className="text-xl font-extrabold uppercase text-amber-300">{t.winnersSelected}</h3>
+          <div className="mt-4 space-y-2">
+            {[1, 2, 3].map((place) => {
+              const placed = revealedPlacements[String(place)];
+              return (
+                <div key={place} className="flex items-center justify-between gap-3 rounded-xl bg-slate-950/40 px-4 py-3 text-left">
+                  <span className="text-sm font-bold text-amber-200">
+                    {translate(t.placementWinner, { place: t[{ 1: 'first', 2: 'second', 3: 'third' }[place]] })}
+                  </span>
+                  <span className="text-right">
+                    <span className="block text-xl font-black text-white">#{String(placed.winnerNumber).padStart(3, '0')}</span>
+                    <span className="block font-mono text-xs text-emerald-400">
+                      {placed.winnerPhoneLast4 ? `••••${placed.winnerPhoneLast4}` : t.phoneHidden}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-slate-400">{t.category}: {winner.tier} {t.birr}</p>
+          {drawEvent?.frozenTicketsHash && (
+            <p className="mt-2 break-all text-[10px] text-slate-500">{drawEvent.frozenTicketsHash.slice(0, 12)}</p>
+          )}
+        </div>
+      )}
+
+      {winner && !allThreeWinnersReady && (
         <div className="mt-6 animate-bounce rounded-2xl border-2 border-amber-400 bg-gradient-to-br from-amber-500/20 to-emerald-500/20 p-5 text-center">
           <span className="mb-1 block text-3xl">🎉</span>
           <h3 className="text-xl font-extrabold uppercase text-amber-300">{t.winnerSelected}</h3>

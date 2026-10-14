@@ -519,6 +519,7 @@ function CategoryGrid({ onChoose, prizeAmounts, drawSchedule, latestDraws, activ
             <DrawResults round={activeRounds[tier.amount]} legacyDraw={latestDraws[tier.amount]} t={t} />
             <DrawTimeInfo
               drawAt={drawSchedule[tier.amount]}
+              isDrawComplete={['1', '2', '3'].every((place) => Boolean(activeRounds[tier.amount]?.placements?.[place]))}
               now={now}
               language={language}
               t={t}
@@ -597,7 +598,7 @@ function DrawResults({ round, legacyDraw, t }) {
   );
 }
 
-function DrawTimeInfo({ drawAt, now, language, t }) {
+function DrawTimeInfo({ drawAt, isDrawComplete, now, language, t }) {
   const drawTime = drawAt?.toMillis?.();
   const remaining = Number.isFinite(drawTime) ? drawTime - now : null;
   const formatter = new Intl.DateTimeFormat(language === 'am' ? 'am-ET' : 'en-ET', {
@@ -610,6 +611,9 @@ function DrawTimeInfo({ drawAt, now, language, t }) {
     minute: '2-digit',
   });
 
+  if (isDrawComplete) {
+    return <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">{t.drawFinished}</p>;
+  }
   if (remaining === null) {
     return <p className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">{t.drawNotScheduled}</p>;
   }

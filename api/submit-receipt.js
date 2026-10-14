@@ -1,9 +1,10 @@
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { applyCors } from '../lib/cors.js';
 import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
+import { isValidTicketNumber, RESERVATION_DURATION_MS } from '../lib/ticket-constants.js';
 
-const TICKET_ID_PATTERN = /^(50|100|200|500)-([0-9]{3})$/;
+const VALID_TIERS = [50, 100, 200, 500];
 
 export default async function handler(request, response) {
   if (!applyCors(request, response)) return;
@@ -18,14 +19,23 @@ export default async function handler(request, response) {
 
     const app = getFirebaseAdminApp();
     const user = await getAuth(app).verifyIdToken(authorization.slice(7));
-    const reservationId = request.body?.reservationId;
+    
+    const tier = Number(request.body?.tier);
+    const number = Number(request.body?.number);
+    const fullName = typeof request.body?.fullName === 'string' ? request.body.fullName.trim() : '';
+    const phone = typeof request.body?.phone === 'string' ? request.body.phone.trim() : '';
     const receiptUrl = request.body?.receiptUrl;
-    if (typeof reservationId !== 'string' || !TICKET_ID_PATTERN.test(reservationId)) {
-      return response.status(400).json({ error: 'Ticket reservation is invalid.' });
+
+    if (!VALID_TIERS.includes(tier) || !isValidTicketNumber(number)) {
+      return response.status(400).json({ error: 'Ticket details are invalid.' });
+    }
+    if (fullName.length < 1 || fullName.length > 100 || phone.length < 7 || phone.length > 32) {
+      return response.status(400).json({ error: 'Contact details are invalid.' });
     }
     if (typeof receiptUrl !== 'string' || receiptUrl.length > 2048) {
       return response.status(400).json({ error: 'Receipt image URL is invalid.' });
     }
+
     let parsedReceiptUrl;
     try {
       parsedReceiptUrl = new URL(receiptUrl);
@@ -38,63 +48,102 @@ export default async function handler(request, response) {
       return response.status(400).json({ error: 'Receipt must be stored in Cloudinary.' });
     }
 
+    const tierCode = String(tier);
+    const numberCode = String(number).padStart(3, '0');
+    const ticketId = `${tierCode}-${numberCode}`;
+
     const db = getFirestore(app);
-    const reservationRef = db.collection('ticketReservations').doc(reservationId);
-    const boardRef = db.collection('ticketBoard').doc(reservationId);
+    const reservationRef = db.collection('ticketReservations').doc(ticketId);
+    const boardRef = db.collection('ticketBoard').doc(ticketId);
+    const confirmedEntryQuery = db.collection('entries')
+      .where('tier', '==', tier)
+      .where('number', '==', numberCode)
+      .where('status', '==', 'approved')
+      .limit(1);
+
+    const now = Date.now();
+    const expiresAt = Timestamp.fromMillis(now + RESERVATION_DURATION_MS);
+
     const entryRef = db.collection('entries').doc();
     const privateEntryRef = db.collection('entryPrivate').doc(entryRef.id);
+
     const result = await db.runTransaction(async (transaction) => {
-      const [reservationSnapshot, boardSnapshot] = await Promise.all([
+      const [reservationSnapshot, boardSnapshot, confirmedEntrySnapshot] = await Promise.all([
         transaction.get(reservationRef),
         transaction.get(boardRef),
+        transaction.get(confirmedEntryQuery),
       ]);
-      if (!reservationSnapshot.exists || !boardSnapshot.exists) {
-        const error = new Error('Ticket reservation expired.');
-        error.code = 'RESERVATION_EXPIRED';
-        throw error;
-      }
 
-      const reservation = reservationSnapshot.data();
-      const board = boardSnapshot.data();
-      if (reservation.ownerUid !== user.uid
-        || reservation.status !== 'reserved'
-        || reservation.expiresAt?.toMillis() <= Date.now()
-        || board.ownerUid !== user.uid
-        || board.status !== 'reserved') {
-        const error = new Error('Ticket reservation expired.');
-        error.code = 'RESERVATION_EXPIRED';
+      const isStillHeld = (snapshot) => {
+        if (!snapshot.exists) return false;
+        const existing = snapshot.data();
+        return existing.status === 'approved' 
+          || existing.status === 'pending' 
+          || (existing.status === 'reserved' && existing.expiresAt?.toMillis() > now);
+      };
+
+      if (confirmedEntrySnapshot.size > 0
+        || isStillHeld(reservationSnapshot)
+        || isStillHeld(boardSnapshot)) {
+        const error = new Error('Ticket number is already reserved or taken.');
+        error.code = 'TICKET_TAKEN';
         throw error;
       }
 
       const entry = {
         entryId: entryRef.id,
-        tier: Number(reservation.tier),
-        number: reservation.number,
-        ticketReservationId: reservationId,
-        phoneLast4: board.phoneLast4,
+        tier: Number(tier),
+        number: numberCode,
+        ticketReservationId: ticketId,
+        phoneLast4: phone.slice(-4),
         status: 'pending',
         createdAt: FieldValue.serverTimestamp(),
       };
-      transaction.create(entryRef, entry);
-      transaction.create(privateEntryRef, {
+
+      const reservation = {
+        ownerUid: user.uid,
+        tier: tierCode,
+        number: numberCode,
+        fullName,
+        phone,
+        status: 'pending',
+        entryId: entryRef.id,
+        reservedAt: FieldValue.serverTimestamp(),
+        expiresAt,
+      };
+
+      const boardData = {
+        ownerUid: user.uid,
+        tier: tierCode,
+        number: numberCode,
+        fullName,
+        phoneLast4: phone.slice(-4),
+        status: 'pending',
+        reservedAt: FieldValue.serverTimestamp(),
+        expiresAt,
+      };
+
+      transaction.set(entryRef, entry);
+      transaction.set(privateEntryRef, {
         userId: user.uid,
         email: user.email || '',
-        fullName: reservation.fullName,
-        phone: reservation.phone,
-        tier: reservation.tier,
-        number: reservation.number,
-        ticketReservationId: reservationId,
-        expiresAt: reservation.expiresAt,
+        fullName,
+        phone,
+        tier: tierCode,
+        number: numberCode,
+        ticketReservationId: ticketId,
+        expiresAt,
         receiptUrl,
       });
-      transaction.update(reservationRef, { status: 'pending', entryId: entryRef.id });
-      transaction.update(boardRef, { status: 'pending' });
-      return { entryId: entryRef.id };
+      transaction.set(reservationRef, reservation);
+      transaction.set(boardRef, boardData);
+
+      return { entryId: entryRef.id, reservationId: ticketId };
     });
 
     return response.status(200).json(result);
   } catch (error) {
-    if (error.code === 'RESERVATION_EXPIRED') {
+    if (error.code === 'TICKET_TAKEN') {
       return response.status(409).json({ code: error.code, error: error.message });
     }
     console.error('Receipt submission error:', error);
