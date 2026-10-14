@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/api/reserve-ticket", "destination": "/api/ticket" },
+    { "source": "/api/submit-receipt", "destination": "/api/ticket" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
