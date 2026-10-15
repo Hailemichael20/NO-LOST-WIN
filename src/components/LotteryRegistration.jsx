@@ -63,10 +63,7 @@ export default function LotteryRegistration({ user, language }) {
     setDrawSchedule(nextSchedule);
     setDrawScheduleError('');
   }, (scheduleError) => {
-    console.error('Draw schedule listener error:', {
-      code: scheduleError.code,
-      message: scheduleError.message,
-    }, scheduleError);
+    console.error('Draw schedule listener error:', scheduleError);
     setDrawScheduleError(t.drawScheduleLoadError);
   }), [t.drawScheduleLoadError]);
 
@@ -88,10 +85,7 @@ export default function LotteryRegistration({ user, language }) {
         erroredTiers.delete(amount);
         if (erroredTiers.size === 0) setDrawEventsError('');
       }, (drawError) => {
-        console.error('Draw event listener error:', {
-          code: drawError.code,
-          message: drawError.message,
-        }, drawError);
+        console.error('Draw event listener error:', drawError);
         erroredTiers.add(amount);
         setDrawEventsError(t.drawEventsLoadError);
       });
@@ -110,10 +104,7 @@ export default function LotteryRegistration({ user, language }) {
         setDrawRoundsError('');
       },
       (roundError) => {
-        console.error('Draw round listener error:', {
-          code: roundError.code,
-          message: roundError.message,
-        }, roundError);
+        console.error('Draw round listener error:', roundError);
         setDrawRoundsError(t.drawRoundsLoadError);
       },
     ));
@@ -207,55 +198,61 @@ export default function LotteryRegistration({ user, language }) {
     let confirmedLoaded = false;
     let ownerLoaded = false;
     setReservationsLoading(true);
+    setError('');
 
     const updateReservations = () => {
-      setReservations(
-        [...activeReservations, ...confirmedReservations].map((item) => {
-          const ownerReservation = ownerReservations.get(item.id);
-          return {
-            ...item,
-            ownerUid: ownerReservation ? user.uid : item.ownerUid,
-            fullName: ownerReservation?.fullName || item.fullName || '',
-            phone: ownerReservation?.phone,
-          };
-        }),
-      );
+      const mergedMap = new Map();
+      [...activeReservations, ...confirmedReservations].forEach((item) => {
+        const ownerReservation = ownerReservations.get(item.id);
+        mergedMap.set(item.id || item.number, {
+          ...item,
+          ownerUid: ownerReservation ? user.uid : item.ownerUid,
+          fullName: ownerReservation?.fullName || item.fullName || '',
+          phone: ownerReservation?.phone,
+        });
+      });
+      setReservations(Array.from(mergedMap.values()));
       if (activeLoaded && confirmedLoaded && ownerLoaded) setReservationsLoading(false);
     };
+
     const handleListError = (listError) => {
       console.error('Ticket list error:', listError);
       setError(t.entriesLoadError);
       setReservationsLoading(false);
     };
 
+    // Query 1: ticketBoard for active/pending reservations
     const unsubscribeActive = onSnapshot(
       query(
         collection(db, 'ticketBoard'),
         where('tier', '==', String(selectedTier)),
-        where('status', 'in', ['reserved', 'pending', 'rejected']),
-        where('expiresAt', '>', Timestamp.fromMillis(ticketQueryAfter)),
       ),
       (snapshot) => {
-        activeReservations = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+        activeReservations = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((item) => item.status === 'reserved' || item.status === 'pending' || item.status === 'approved');
         activeLoaded = true;
         updateReservations();
       },
       handleListError,
     );
+
+    // Query 2: entries for approved confirmed tickets
     const unsubscribeConfirmed = onSnapshot(
       query(
         collection(db, 'entries'),
         where('tier', '==', Number(selectedTier)),
-        where('status', 'in', ['approved', 'pending']),
-        orderBy('number', 'asc'),
+        where('status', '==', 'approved'),
       ),
       (snapshot) => {
-        confirmedReservations = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+        confirmedReservations = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         confirmedLoaded = true;
         updateReservations();
       },
       handleListError,
     );
+
+    // Query 3: user's personal reservations
     const unsubscribeOwnerReservations = onSnapshot(
       query(
         collection(db, 'ticketReservations'),
@@ -263,18 +260,19 @@ export default function LotteryRegistration({ user, language }) {
         where('ownerUid', '==', user.uid),
       ),
       (snapshot) => {
-        ownerReservations = new Map(snapshot.docs.map((item) => [item.id, item.data()]));
+        ownerReservations = new Map(snapshot.docs.map((doc) => [doc.id, doc.data()]));
         ownerLoaded = true;
         updateReservations();
       },
       handleListError,
     );
+
     return () => {
       unsubscribeActive();
       unsubscribeConfirmed();
       unsubscribeOwnerReservations();
     };
-  }, [selectedTier, t.entriesLoadError, ticketQueryAfter, user.uid]);
+  }, [selectedTier, t.entriesLoadError, user.uid]);
 
   useEffect(() => {
     if (!currentReservation) return undefined;
@@ -665,10 +663,10 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
                 const remaining = item.expiresAt ? Math.max(0, item.expiresAt.toMillis() - now) : 0;
                 const countdown = `${String(Math.floor(remaining / 60000)).padStart(2, '0')}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0')}`;
                 return (
-                  <div key={item.id} className="rounded-2xl bg-white/5 px-4 py-3">
+                  <div key={item.id || item.number} className="rounded-2xl bg-white/5 px-4 py-3">
                     <div className="grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-2">
                       <strong className="whitespace-nowrap font-mono text-cyan-300">#{String(item.number).padStart(3, '0')}</strong>
-                      <span className="whitespace-nowrap text-xs text-slate-300">•••• {item.phoneLast4}</span>
+                      <span className="whitespace-nowrap text-xs text-slate-300">•••• {item.phoneLast4 || (item.phone ? item.phone.slice(-4) : '****')}</span>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${item.status === 'approved' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-300/15 text-amber-200'}`}>{statusLabels[item.status] || t.reserved}</span>
                     </div>
                     {item.status !== 'approved' && item.status !== 'pending' && <p className="mt-2 text-right text-[10px] text-slate-400">{t.timeRemaining}: {countdown}</p>}
@@ -684,7 +682,7 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
 function TicketPicker({ fullName, setFullName, phoneNumber, setPhoneNumber, reservations, loading, onChoose, t }) {
   const now = useCurrentTime(30000);
   const heldNumbers = new Set(reservations
-    .filter((item) => item.status === 'approved' || item.status === 'pending' || item.expiresAt?.toMillis() > now)
+    .filter((item) => item.status === 'approved' || item.status === 'pending' || (item.expiresAt?.toMillis && item.expiresAt.toMillis() > now))
     .map((item) => Number(item.number)));
 
   return (
