@@ -174,7 +174,7 @@ async function handleSubmit(request, response) {
         createdAt: FieldValue.serverTimestamp(),
       });
 
-      // CRITICAL FIX: Set expiresAt to null so pending tickets never expire or disappear on refresh
+      // Update reservation status and clear expiration
       transaction.update(reservationRef, {
         status: 'pending',
         receiptUrl,
@@ -182,8 +182,10 @@ async function handleSubmit(request, response) {
         updatedAt: FieldValue.serverTimestamp(),
       });
 
+      // Update ticketBoard with status, expiration null, and receiptUrl for grid preview
       transaction.update(db.collection('ticketBoard').doc(reservationId), {
         status: 'pending',
+        receiptUrl,
         expiresAt: null,
         updatedAt: FieldValue.serverTimestamp(),
       });
