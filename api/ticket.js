@@ -5,7 +5,6 @@ import { getFirebaseAdminApp } from '../lib/firebase-admin.js';
 import { isValidTicketNumber } from '../lib/ticket-constants.js';
 
 const VALID_TIERS = [50, 100, 200, 500];
-// Short 2-minute temporary window just to let them pick file & upload receipt
 const SHORT_RESERVATION_MS = 2 * 60 * 1000;
 
 export default async function handler(request, response) {
@@ -24,7 +23,6 @@ export default async function handler(request, response) {
   return response.status(404).json({ error: 'Endpoint not found.' });
 }
 
-// --- Short Temporary Hold (2 Minutes Max) ---
 async function handleReserve(request, response) {
   try {
     const authorization = request.headers.authorization || '';
@@ -68,7 +66,9 @@ async function handleReserve(request, response) {
       const isTaken = (snapshot) => {
         if (!snapshot.exists) return false;
         const existing = snapshot.data();
-        return existing.status === 'approved' || (existing.status === 'pending' && existing.expiresAt?.toMillis() > now) || (existing.status === 'reserved' && existing.expiresAt?.toMillis() > now);
+        return existing.status === 'approved' || 
+               existing.status === 'pending' || 
+               (existing.status === 'reserved' && existing.expiresAt?.toMillis() > now);
       };
 
       if (confirmedEntrySnapshot.size > 0 || isTaken(reservationSnapshot) || isTaken(boardSnapshot)) {
@@ -116,7 +116,6 @@ async function handleReserve(request, response) {
   }
 }
 
-// --- Submit Receipt & Lock Ticket ---
 async function handleSubmit(request, response) {
   try {
     const authorization = request.headers.authorization || '';
@@ -156,7 +155,6 @@ async function handleSubmit(request, response) {
       const entryRef = db.collection('entries').doc();
       entryId = entryRef.id;
 
-      // Create official entry attached to receipt
       transaction.set(entryRef, {
         tier: tierNumber,
         number: reservation.number,
@@ -176,14 +174,17 @@ async function handleSubmit(request, response) {
         createdAt: FieldValue.serverTimestamp(),
       });
 
+      // CRITICAL FIX: Set expiresAt to null so pending tickets never expire or disappear on refresh
       transaction.update(reservationRef, {
         status: 'pending',
         receiptUrl,
+        expiresAt: null,
         updatedAt: FieldValue.serverTimestamp(),
       });
 
       transaction.update(db.collection('ticketBoard').doc(reservationId), {
         status: 'pending',
+        expiresAt: null,
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
