@@ -246,7 +246,7 @@ export default function LotteryRegistration({ user, language }) {
       query(
         collection(db, 'entries'),
         where('tier', '==', Number(selectedTier)),
-        where('status', '==', 'approved'),
+        where('status', 'in', ['approved', 'pending']),
         orderBy('number', 'asc'),
       ),
       (snapshot) => {
@@ -641,7 +641,7 @@ function DrawTimeInfo({ drawAt, isDrawComplete, now, language, t }) {
 function RegisteredList({ amount, reservations, loading, userId, t }) {
   const now = useCurrentTime(15000);
   const active = reservations
-    .filter((item) => item.status === 'approved' && Number.isInteger(Number(item.number)))
+    .filter((item) => (item.status === 'approved' || item.status === 'pending') && Number.isInteger(Number(item.number)))
     .sort((left, right) => Number(left.number) - Number(right.number));
   const confirmedCount = active.filter((item) => item.status === 'approved').length;
   const statusLabels = { reserved: t.awaitingPayment, pending: t.underReview, approved: t.confirmed, rejected: t.rejected };
@@ -671,7 +671,7 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
                       <span className="whitespace-nowrap text-xs text-slate-300">•••• {item.phoneLast4}</span>
                       <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${item.status === 'approved' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-300/15 text-amber-200'}`}>{statusLabels[item.status] || t.reserved}</span>
                     </div>
-                    {item.status !== 'approved' && <p className="mt-2 text-right text-[10px] text-slate-400">{t.timeRemaining}: {countdown}</p>}
+                    {item.status !== 'approved' && item.status !== 'pending' && <p className="mt-2 text-right text-[10px] text-slate-400">{t.timeRemaining}: {countdown}</p>}
                   </div>
                 );
               })}
@@ -684,7 +684,7 @@ function RegisteredList({ amount, reservations, loading, userId, t }) {
 function TicketPicker({ fullName, setFullName, phoneNumber, setPhoneNumber, reservations, loading, onChoose, t }) {
   const now = useCurrentTime(30000);
   const heldNumbers = new Set(reservations
-    .filter((item) => item.status === 'approved' || item.expiresAt?.toMillis() > now)
+    .filter((item) => item.status === 'approved' || item.status === 'pending' || item.expiresAt?.toMillis() > now)
     .map((item) => Number(item.number)));
 
   return (
@@ -718,43 +718,44 @@ function PaymentPanel({ amount, reservation, paymentDetails, onDone, t }) {
     <h2 className="mt-2 text-2xl font-black text-slate-950">{t.completePayment}</h2>
     <p className="mt-2 text-sm leading-6 text-slate-500">{t.transferInstructions} <strong className="text-slate-950">{amount} {t.birr}</strong>, {t.thenUpload}</p>
     <p className="mt-2 text-xs font-bold text-orange-700">{t.timeRemaining}: {countdown}</p>
-    {paymentReady ? <div className="my-6 space-y-3 rounded-2xl bg-orange-50 p-4 text-sm text-orange-950">{paymentDetails.telebirr && <p><strong>Telebirr</strong><br /><span className="font-mono font-bold">{paymentDetails.telebirr}</span></p>}{paymentDetails.cbe && <p><strong>CBE</strong><br /><span className="font-mono font-bold">{paymentDetails.cbe}</span></p>}</div> : <p className="my-6 rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700">{t.paymentNotConfigured}</p>}
-    <button disabled={!paymentReady} onClick={onDone} className="w-full rounded-2xl bg-orange-500 py-3.5 text-sm font-bold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">{t.completedPayment}</button>
+    {paymentReady ? <div className="my-6 space-y-3 rounded-2xl bg-orange-50 p-4 text-sm text-orange-950">{paymentDetails.telebirr && <p><strong>Telebirr</strong><br /><span className="font-mono font-bold">{paymentDetails.telebirr}</span></p>}{paymentDetails.cbe && <p><strong>CBE</strong><br /><span className="font-mono font-bold">{paymentDetails.cbe}</span></p>}</div> : <p className="my-6 text-sm text-slate-500">{t.noPaymentConfig}</p>}
+    <button type="button" onClick={onDone} className="w-full rounded-2xl bg-slate-950 py-4 text-sm font-bold text-white transition hover:bg-slate-900">{t.proceedToUpload}</button>
   </div>;
-}
-
-function useCurrentTime(intervalMs) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(interval);
-  }, [intervalMs]);
-
-  return now;
 }
 
 function ReceiptForm({ handleFileChange, filePreview, handleSubmit, loading, uploadProgress, number, t }) {
   return <form onSubmit={handleSubmit} className="rounded-[1.75rem] bg-white p-6 shadow-xl shadow-slate-900/5">
     <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-700">{t.step} 3 · #{String(number).padStart(3, '0')}</p>
     <h2 className="mt-2 text-2xl font-black text-slate-950">{t.uploadReceipt}</h2>
-    <div className="mt-6 space-y-4">
-      <label className="block text-sm font-bold text-slate-700">{t.paymentPhoto}<input required type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} className="mt-2 block w-full text-sm text-slate-500 file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-50 file:px-4 file:py-2.5 file:font-bold file:text-cyan-700" /></label>
-      <p className="text-xs text-slate-500">{t.receiptTypes}</p>
-      {filePreview && <img src={filePreview} alt={t.paymentPhoto} className="h-40 w-full rounded-2xl border border-slate-100 object-contain" />}
-      {loading && <p className="text-sm font-bold text-cyan-700">{translate(t.uploading, { progress: uploadProgress })}</p>}
-      <button disabled={loading} className="w-full rounded-2xl bg-slate-950 py-3.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">{loading ? t.submitting : t.submitRegistration}</button>
-    </div>
+    <p className="mt-2 text-sm text-slate-500">{t.uploadInstructions}</p>
+    <label className="mt-6 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center transition hover:border-cyan-500 cursor-pointer">
+      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} className="hidden" />
+      {filePreview ? <img src={filePreview} alt="Receipt preview" className="max-h-48 rounded-xl object-contain shadow-md" /> : <span className="text-sm font-bold text-cyan-700">{t.chooseReceiptFile}</span>}
+    </label>
+    {loading && uploadProgress > 0 && <div className="mt-4"><div className="flex justify-between text-xs font-bold text-slate-600 mb-1"><span>{t.uploading || 'Uploading...'}</span><span>{uploadProgress}%</span></div><div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-cyan-600 transition-all duration-300" style={{ width: `${uploadProgress}%` }} /></div></div>}
+    <button type="submit" disabled={loading} className="mt-6 w-full rounded-2xl bg-slate-950 py-4 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-50">{loading ? t.submitting : t.submitReceiptButton}</button>
   </form>;
 }
 
 function SuccessMessage({ amount, number, t, notificationFailed, onReset }) {
-  return <div className="mx-auto max-w-md rounded-[1.75rem] bg-white p-8 text-center shadow-xl">
-    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-3xl font-black text-emerald-600">✓</div>
-    <h2 className="mt-5 text-2xl font-black text-slate-950">{t.receiptReceived}</h2>
-    {notificationFailed && <p role="alert" className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">{t.receiptNotificationFailed}</p>}
-    <p className="mt-2 font-mono text-xl font-black text-cyan-700">#{String(number).padStart(3, '0')}</p>
-    <p className="mt-2 text-sm leading-6 text-slate-500">{translate(t.pendingVerification, { amount, number })}</p>
-    <button onClick={onReset} className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white">{t.chooseAnother}</button>
+  return <div className="mx-auto max-w-lg rounded-[1.75rem] bg-white p-8 text-center shadow-xl shadow-slate-900/5">
+    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 text-2xl">✓</div>
+    <h2 className="mt-4 text-2xl font-black text-slate-950">{t.receiptSubmittedTitle || 'Receipt Submitted Successfully!'}</h2>
+    <p className="mt-2 text-sm text-slate-500">{t.receiptSubmittedDesc || 'Your ticket is now pending admin review.'}</p>
+    {notificationFailed && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">{t.telegramNoticeFailed || 'Note: Telegram notification could not be sent, but your submission was saved successfully.'}</p>}
+    <div className="mt-6 rounded-2xl bg-slate-50 p-4">
+      <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t.ticket}</p>
+      <p className="mt-1 font-mono text-2xl font-black text-slate-950">#{String(number).padStart(3, '0')} ({amount} {t.birr})</p>
+    </div>
+    <button onClick={onReset} className="mt-6 w-full rounded-2xl bg-slate-950 py-4 text-sm font-bold text-white transition hover:bg-slate-900">{t.backHome || 'Return to Dashboard'}</button>
   </div>;
+}
+
+function useCurrentTime(intervalMs) {
+  const [time, setTime] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setTime(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return time;
 }
