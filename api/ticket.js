@@ -6,6 +6,7 @@ import { isValidTicketNumber } from '../lib/ticket-constants.js';
 
 const VALID_TIERS = [50, 100, 200, 500];
 const SHORT_RESERVATION_MS = 2 * 60 * 1000;
+const PENDING_WINDOW_MS = 24 * 60 * 60 * 1000; // 24-hour window to keep grid locked and visible
 
 export default async function handler(request, response) {
   if (!applyCors(request, response)) return;
@@ -174,19 +175,20 @@ async function handleSubmit(request, response) {
         createdAt: FieldValue.serverTimestamp(),
       });
 
-      // Update reservation status and clear expiration
+      // Set extended 24-hour expiration window so frontend grid keeps the lock visible
+      const pendingExpiresAt = Timestamp.fromMillis(Date.now() + PENDING_WINDOW_MS);
+
       transaction.update(reservationRef, {
         status: 'pending',
         receiptUrl,
-        expiresAt: null,
+        expiresAt: pendingExpiresAt,
         updatedAt: FieldValue.serverTimestamp(),
       });
 
-      // Update ticketBoard with status, expiration null, and receiptUrl for grid preview
       transaction.update(db.collection('ticketBoard').doc(reservationId), {
         status: 'pending',
         receiptUrl,
-        expiresAt: null,
+        expiresAt: pendingExpiresAt,
         updatedAt: FieldValue.serverTimestamp(),
       });
     });
