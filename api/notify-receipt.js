@@ -37,9 +37,13 @@ export default async function handler(request, response) {
 
     const entry = entrySnapshot.data();
     const privateEntry = privateEntrySnapshot.exists ? privateEntrySnapshot.data() : entry;
-    if (privateEntry.userId !== token.uid) {
+    
+    // Fixed: check both uid and userId to prevent permission errors
+    const ownerId = privateEntry.uid || privateEntry.userId || entry.uid;
+    if (ownerId && ownerId !== token.uid && !token.admin) {
       return response.status(403).json({ error: 'You cannot notify for this receipt.' });
     }
+
     if (entry.status !== 'pending') {
       return response.status(409).json({ error: 'Only pending receipts can be sent for review.' });
     }
@@ -52,10 +56,12 @@ export default async function handler(request, response) {
       ? entry.createdAt.toDate()
       : new Date();
     const ticketNumber = entry.number || privateEntry.number;
+    const receiptUrl = entry.receiptUrl || privateEntry.receiptUrl || 'Unavailable';
+
     const message = [
       'New payment receipt uploaded / አዲስ የክፍያ ደረሰኝ ተጭኗል',
-      `Name / ስም: ${privateEntry.fullName || 'Not provided'}`,
-      `Phone / ስልክ: ${privateEntry.phone || 'Not provided'}`,
+      `Name / ስም: ${privateEntry.fullName || entry.fullName || 'Not provided'}`,
+      `Phone / ስልክ: ${privateEntry.phone || entry.phone || 'Not provided'}`,
       `Category / ምድብ: ${entry.tier} Birr`,
       `Number / ቁጥር: ${ticketNumber ? `#${String(ticketNumber).padStart(3, '0')}` : 'Not provided'}`,
       `Time / ሰዓት: ${new Intl.DateTimeFormat('en-ET', {
@@ -63,7 +69,7 @@ export default async function handler(request, response) {
         dateStyle: 'medium',
         timeStyle: 'medium',
       }).format(createdAt)}`,
-      `Receipt / ደረሰኝ: ${privateEntry.receiptUrl || 'Unavailable'}`,
+      `Receipt / ደረሰኝ: ${receiptUrl}`,
     ].join('\n');
 
     const telegramResponse = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -84,6 +90,7 @@ export default async function handler(request, response) {
 
     const telegramResult = await telegramResponse.json();
     if (!telegramResponse.ok || !telegramResult.ok) {
+      console.error('Telegram API error response:', telegramResult);
       return response.status(502).json({ error: 'Telegram notification failed.' });
     }
 
