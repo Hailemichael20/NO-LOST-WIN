@@ -131,7 +131,7 @@ export default function App() {
 
   return (
     <Router>
-      <div className="app-shell flex flex-col font-sans text-slate-900">
+      <div className="app-shell flex flex-col font-sans text-slate-900 pb-16">
         <Navbar user={user} language={language} setLanguage={changeLanguage} />
 
         <main className="container mx-auto w-full flex-grow px-4 py-8 sm:px-6 sm:py-12">
@@ -171,20 +171,38 @@ export default function App() {
           )}
         </main>
 
-        {showInstallBanner && (
-          <div className="border-t border-slate-200 bg-slate-900 px-4 py-3 text-white">
-            <div className="mx-auto flex max-w-4xl flex-col items-center justify-between gap-3 text-center sm:flex-row sm:text-left">
-              <p className="text-sm font-semibold">
-                {installPrompt ? t.installAppPrompt : t.installIosPrompt}
-              </p>
+        {/* Install & Telegram Contact Banner Bar */}
+        <div className="border-t border-slate-800 bg-slate-950 px-4 py-3 text-white">
+          <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-3 text-center sm:flex-row sm:text-left">
+            <p className="text-xs font-medium text-slate-300 sm:text-sm">
+              {installPrompt ? t.installAppPrompt : t.installIosPrompt}
+            </p>
+            <div className="flex items-center gap-3">
+              {/* Telegram Contact Button with your Group Link */}
+              <a
+                href="https://t.me/+6vcHcJ6FeuswZmY0"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-sky-600"
+              >
+                <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12 0C5.37 0 0 5.37 0 12s5.37 12 12 12 12-5.37 12-12S18.63 0 12 0zm5.56 8.16l-2.02 9.53c-.15.68-.56.84-1.13.53l-3.1-2.28-1.5 1.44c-.17.17-.31.31-.63.31l.22-3.17 5.77-5.21c.25-.22-.05-.34-.39-.12l-7.13 4.49-3.08-.96c-.67-.21-.68-.67.14-.99l12.04-4.64c.56-.2 1.05.14.83.92z"/>
+                </svg>
+                <span>Telegram</span>
+              </a>
+
+              {/* Install Button */}
               {installPrompt && (
-                <button onClick={handleInstallApp} className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900">
+                <button
+                  onClick={handleInstallApp}
+                  className="rounded-xl bg-white px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-slate-100"
+                >
                   {t.installAppButton}
                 </button>
               )}
             </div>
           </div>
-        )}
+        </div>
 
         <footer className="border-t border-slate-200/70 px-4 py-6 text-center text-xs font-medium text-slate-400">
           {user && <Announcements language={language} />}

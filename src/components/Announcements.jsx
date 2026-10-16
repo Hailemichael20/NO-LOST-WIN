@@ -20,13 +20,25 @@ export default function Announcements({ language }) {
     ? announcement?.bodyAm || announcement?.bodyEn
     : announcement?.bodyEn || announcement?.bodyAm;
 
+  const hasContent = Boolean(title || message);
+
   return (
     <details className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white text-left shadow-sm">
-      <summary className="cursor-pointer list-none px-5 py-4 text-sm font-bold text-slate-700 marker:hidden">
-        <span className="mr-2 text-amber-500">▾</span>{t.announcement}
+      <summary className="flex cursor-pointer items-center justify-between px-5 py-4 text-sm font-bold text-slate-700 marker:hidden">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-500">▾</span>
+          <span>{t.announcement}</span>
+        </div>
+
+        {/* Circled Red Notification Badge */}
+        {hasContent && (
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white shadow-sm">
+            1
+          </span>
+        )}
       </summary>
       <div className="border-t border-slate-100 px-5 py-4">
-        {title || message
+        {hasContent
           ? <><h2 className="font-bold text-slate-900">{title}</h2><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{message}</p></>
           : <p className="text-sm text-slate-500">{t.announcementHidden}</p>}
       </div>
