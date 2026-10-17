@@ -135,10 +135,17 @@ async function handleSubmit(request, response) {
 
     const db = getFirestore(app);
     const reservationRef = db.collection('ticketReservations').doc(reservationId);
+    const existingEntryQuery = db.collection('entries')
+      .where('ticketReservationId', '==', reservationId)
+      .limit(1);
 
     let entryId = '';
     await db.runTransaction(async (transaction) => {
-      const reservationSnapshot = await transaction.get(reservationRef);
+      const [reservationSnapshot, existingEntrySnapshot] = await Promise.all([
+        transaction.get(reservationRef),
+        transaction.get(existingEntryQuery),
+      ]);
+
       if (!reservationSnapshot.exists) {
         const error = new Error('Reservation not found.');
         error.code = 'RESERVATION_NOT_FOUND';
@@ -153,27 +160,41 @@ async function handleSubmit(request, response) {
       }
 
       const tierNumber = Number(reservation.tier);
-      const entryRef = db.collection('entries').doc();
-      entryId = entryRef.id;
 
-      transaction.set(entryRef, {
-        tier: tierNumber,
-        number: reservation.number,
-        fullName: reservation.fullName,
-        phone: reservation.phone,
-        phoneLast4: reservation.phone.slice(-4),
-        uid: user.uid,
-        receiptUrl,
-        status: 'pending',
-        ticketReservationId: reservationId,
-        createdAt: FieldValue.serverTimestamp(),
-      });
+      // Prevent duplicates: If an entry already exists for this reservation, reuse it!
+      if (!existingEntrySnapshot.empty) {
+        const existingDoc = existingEntrySnapshot.docs[0];
+        entryId = existingDoc.id;
+        
+        // Update existing entry with latest details/receipt if needed
+        transaction.update(existingDoc.ref, {
+          receiptUrl,
+          status: 'pending',
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        const entryRef = db.collection('entries').doc();
+        entryId = entryRef.id;
 
-      transaction.set(db.collection('entryPrivate').doc(entryId), {
-        uid: user.uid,
-        phone: reservation.phone,
-        createdAt: FieldValue.serverTimestamp(),
-      });
+        transaction.set(entryRef, {
+          tier: tierNumber,
+          number: reservation.number,
+          fullName: reservation.fullName,
+          phone: reservation.phone,
+          phoneLast4: reservation.phone.slice(-4),
+          uid: user.uid,
+          receiptUrl,
+          status: 'pending',
+          ticketReservationId: reservationId,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        transaction.set(db.collection('entryPrivate').doc(entryId), {
+          uid: user.uid,
+          phone: reservation.phone,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
 
       // Set extended 24-hour expiration window so frontend grid keeps the lock visible
       const pendingExpiresAt = Timestamp.fromMillis(Date.now() + PENDING_WINDOW_MS);
